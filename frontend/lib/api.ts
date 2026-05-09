@@ -36,6 +36,18 @@ export async function getHealth(): Promise<{ status: string }> {
   return safeFetch('/health');
 }
 
+export interface RouteOption {
+  ruta: string;
+  fecha: string;
+  n_customers: number;
+  run_id: string;
+}
+
+export async function getRoutes(): Promise<RouteOption[]> {
+  const r = await safeFetch<{ routes: RouteOption[] }>('/routes');
+  return r.routes;
+}
+
 export async function getBaseline(
   ruta: string,
   fecha: string,

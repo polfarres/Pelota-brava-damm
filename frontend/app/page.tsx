@@ -7,21 +7,22 @@ import KpiPanel from '@/components/KpiPanel';
 import ExplanationCard from '@/components/ExplanationCard';
 import { MOCK_PLAN } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
+import { useRunId } from '@/lib/runId';
 import type { Plan } from '@/lib/types';
-
-const RUN_ID = 'DR0027-2026-05-08';
 
 // Leaflet must not be SSR'd.
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
 export default function Dashboard() {
+  const runId = useRunId();
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(1);
   const [apiOk, setApiOk] = useState<'pending' | 'ok' | 'fallback'>('pending');
 
   useEffect(() => {
     let cancelled = false;
-    getPlan(RUN_ID)
+    setApiOk('pending');
+    getPlan(runId)
       .then((p) => {
         if (!cancelled) {
           setPlan(p);
@@ -35,7 +36,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [runId]);
 
   const selectedStop = useMemo(
     () => plan.stops.find((s) => s.sequence === selectedSeq) ?? null,
@@ -75,7 +76,7 @@ export default function Dashboard() {
           stops={plan.stops}
           selectedSeq={selectedSeq}
           onSelect={setSelectedSeq}
-          runId={apiOk === 'ok' ? RUN_ID : undefined}
+          runId={apiOk === 'ok' ? runId : undefined}
         />
       </section>
 

@@ -66,12 +66,53 @@ _PROFILE_TO_FILE = {
     "truck_8p_lift": "truck_8p_lift.yaml",
 }
 
+# Profiles ordered ascending by total slot count, so we can pick the
+# smallest one that fits a given carga (DDI's fleet preference: never
+# under-utilise a big truck when a smaller one suffices).
+_PROFILES_BY_SIZE: tuple[VehicleProfileName, ...] = (
+    "furgo_3p",          # 3 slots × 60 CE = 180 CE
+    "truck_6p_sidecurtain",  # 6 × 60 = 360 CE
+    "truck_8p_sidecurtain",  # 8 × 60 = 480 CE
+    "truck_8p_lift",         # 8 × 60 = 480 CE (with lift)
+)
+
 
 def _load_vehicle(profile_name: str):
     fname = _PROFILE_TO_FILE.get(profile_name)
     if not fname:
         raise ValueError(f"Unknown vehicle profile: {profile_name!r}")
     return load_profile(VEHICLES_DIR / fname)
+
+
+def pick_smallest_fitting_vehicle(stops: list[StopDemand]) -> VehicleProfileName:
+    """Return the smallest fleet profile that can carry ``stops``.
+
+    The v2 packer enforces case/barrel segregation (A-37) and a 60 CE
+    cap per slot (A-31), so the constraint is per-type rather than
+    aggregate: ``ceil(case_CE/60) + ceil(barrel_CE/60) ≤ slot_count``.
+    Returns the largest profile if no profile fits (caller decides
+    whether to reject or run anyway with auto-scaling).
+    """
+    from math import ceil
+
+    case_ce = 0.0
+    barrel_ce = 0.0
+    for s in stops:
+        for ln in s.lines:
+            if ln.unit in {"Barril", "Tubo"}:
+                barrel_ce += ln.ce * ln.quantity
+            else:
+                case_ce += ln.ce * ln.quantity
+
+    n_case = ceil(case_ce / 60.0) if case_ce > 0 else 0
+    n_barrel = ceil(barrel_ce / 60.0) if barrel_ce > 0 else 0
+    n_total = n_case + n_barrel
+
+    for profile_name in _PROFILES_BY_SIZE:
+        profile = _load_vehicle(profile_name)
+        if len(profile.slots) >= n_total:
+            return profile_name
+    return _PROFILES_BY_SIZE[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +201,7 @@ def _build_stop_demands_from_deliveries(
                     sku=sku,
                     description=desc_map.get(sku, str(r.get("description", ""))),
                     quantity=qty,
-                    unit=str(r.get("uom", "Caja")),
+                    unit=_normalise_uom(str(r.get("uom", "Caja"))),
                     ce=ce,
                     weight_kg=0.0,
                     source_ubicacion=None,
@@ -168,6 +209,35 @@ def _build_stop_demands_from_deliveries(
             )
         stops.append(StopDemand(sequence=seq, customer_id=cid, lines=lines))
     return stops, cust_to_albaran
+
+
+# Map SAP UoM codes (as they appear in deliveries.parquet) to the
+# Spanish strings the v2 packer expects. CASE_UNITS / BARREL_UNITS in
+# load.py classify units into pallet types via these strings.
+_UOM_NORMALISATION = {
+    "CAJ": "Caja",
+    "PAK": "Pack",
+    "BOT": "Botella",
+    "UN": "Unidad",
+    "LAT": "Lat",
+    "BRL": "Barril",
+    "TB": "Tubo",
+    # Already-normalised values pass through.
+    "Caja": "Caja",
+    "Pack": "Pack",
+    "Botella": "Botella",
+    "Unidad": "Unidad",
+    "Lat": "Lat",
+    "Barril": "Barril",
+    "Tubo": "Tubo",
+}
+
+
+def _normalise_uom(uom: str) -> str:
+    s = uom.strip()
+    if s in _UOM_NORMALISATION:
+        return _UOM_NORMALISATION[s]
+    return _UOM_NORMALISATION.get(s.upper(), s)
 
 
 def _build_stop_demands_from_paperwork(
@@ -310,7 +380,7 @@ def _envase_lines_from_paperwork() -> list[DeliveredLine]:
 def plan(
     ruta: str,
     fecha: date,
-    vehicle_profile: VehicleProfileName = "truck_6p_sidecurtain",
+    vehicle_profile: VehicleProfileName | None = None,
     *,
     familiarity_weight: float = 0.5,
     use_ortools: bool = True,
@@ -321,8 +391,9 @@ def plan(
     Args:
         ruta: route code, e.g. ``"DR0027"``.
         fecha: delivery date.
-        vehicle_profile: which YAML profile to fit. Default
-            ``truck_6p_sidecurtain`` (the most common in the fleet).
+        vehicle_profile: which YAML profile to fit. ``None`` (default)
+            auto-picks the smallest fleet profile that fits the carga
+            (DDI prefers right-sizing the truck to the load).
         familiarity_weight: soft penalty pulling the route towards the
             baseline order (0 = ignore baseline; high = match baseline).
             UI exposes this as the "familiar vs optimal" slider.
@@ -333,8 +404,6 @@ def plan(
     Returns:
         A :class:`Plan` with ``stops`` and ``slot_assignments``.
     """
-    profile = _load_vehicle(vehicle_profile)
-    geo = _customers_geo()
     explanations: list[Explanation] = []
 
     # 1. Build per-stop demand. Prefer parquet; fall back to paperwork
@@ -352,6 +421,22 @@ def plan(
         raise ValueError(
             f"No deliveries found for ruta={ruta!r} date={fecha!r}."
         )
+
+    # 1b. Pick the smallest vehicle profile that can carry these stops.
+    if vehicle_profile is None:
+        vehicle_profile = pick_smallest_fitting_vehicle(stops)
+        explanations.append(
+            Explanation(
+                target="slot",
+                target_id="vehicle",
+                reason=(
+                    f"Smallest fleet profile that fits this carga: "
+                    f"{vehicle_profile} (auto-selected)."
+                ),
+            )
+        )
+    profile = _load_vehicle(vehicle_profile)
+    geo = _customers_geo()
 
     # 2. Build RouteStop list. Drop stops without geocoding (we can't
     #    place them on a map) but keep them in the demand list so the
