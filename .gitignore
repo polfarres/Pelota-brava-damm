@@ -38,4 +38,4 @@ build/
 
 # Local data caches (geocoding etc.) — commit only the curated parquet files
 backend/data/geo_cache.json
-backend/data/processed/
+# Processed parquet files ARE committed (locked decision A-19) — no rule needed.
