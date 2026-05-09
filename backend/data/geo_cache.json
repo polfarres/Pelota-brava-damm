@@ -58,8 +58,8 @@
     2.2239533
   ],
   "AVENIDA SANT LLORENÇ S/N, 08504, SANT JULIÀ DE VILATORTA, Spain": [
-    41.9235273,
-    2.3588354
+    41.9248,
+    2.327
   ],
   "Avinguda Catalunya 3, 08105, SANT FOST DE CAMPSENTELLES, Spain": [
     41.518752,
@@ -201,8 +201,8 @@
     2.265443
   ],
   "CALLE L'HORTA 18, 08107, MARTORELLES, Spain": [
-    39.5108574,
-    -0.414983
+    41.4251545,
+    2.1744746
   ],
   "CALLE LLEIDA S/N, 08500, VIC, Spain": [
     41.9466865,
@@ -300,8 +300,8 @@
     2.2576833
   ],
   "CALLE SABADELL 04-jun, 08500, VIC, Spain": [
-    36.8620524,
-    -2.4454184
+    41.9147708,
+    2.304051
   ],
   "CALLE SANT JORDI 9, 08503, GURB, Spain": [
     41.9410056,
@@ -314,22 +314,13 @@
   "CALLE SANTIAGO RUSI?OL 9, 08160, MONTMELÓ, Spain": null,
   "CALLE SOGORB 35-37, 08560, MANLLEU, Spain": null,
   "CALLE SOGORB 73, 08560, MANLLEU, Spain": null,
-  "CALLE SOLEDAT 13, 08500, VIC, Spain": [
-    40.658337,
-    -3.7644505
-  ],
-  "CALLE SOLEDAT 4, 08500, VIC, Spain": [
-    40.6583748,
-    -3.7649442
-  ],
+  "CALLE SOLEDAT 13, 08500, VIC, Spain": null,
+  "CALLE SOLEDAT 4, 08500, VIC, Spain": null,
   "CALLE TAGAMANENT 1, 08500, VIC, Spain": [
     41.9201837,
     2.2570623
   ],
-  "CALLE TORELLO 25, 08500, VIC, Spain": [
-    39.1566423,
-    -3.0222305
-  ],
+  "CALLE TORELLO 25, 08500, VIC, Spain": null,
   "CALLE TORRENT MAGI 80, 08560, MANLLEU, Spain": [
     41.9999602,
     2.288799
@@ -374,8 +365,8 @@
   ],
   "CARRETERA MONTMELO 120, 08403, GRANOLLERS, Spain": null,
   "CARRETERA N-141 D S/N, 08506, CALLDETENES, Spain": [
-    41.9242,
-    2.2920
+    41.9210323,
+    2.2680704
   ],
   "CARRETERA OLOT 58, 08560, MANLLEU, Spain": [
     42.003834,
@@ -512,8 +503,8 @@
     2.2535142
   ],
   "Carrer de Puig-l'agulla s/n, 08504, SANT JULIÀ DE VILATORTA, Spain": [
-    41.8907569,
-    2.3370278
+    41.921,
+    2.336
   ],
   "Carrer de Ripoll 33, 08500, VIC, Spain": [
     41.9462891,
@@ -671,8 +662,8 @@
     2.2680755
   ],
   "PLAZA SANT ISIDRE 11, 08160, MONTMELO, Spain": [
-    38.7422345,
-    -0.4426195
+    41.5455598,
+    2.2086125
   ],
   "PLAZA SARDANA 1, 08560, MANLLEU, Spain": [
     42.0052225,

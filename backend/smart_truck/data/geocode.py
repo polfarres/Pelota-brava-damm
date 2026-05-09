@@ -97,13 +97,26 @@ def _check_response(r: requests.Response, provider: str) -> None:
         )
 
 
-def _query_photon(address: str) -> tuple[float, float] | None:
+# Catalunya bounding box (west, south, east, north). Used to constrain
+# geocoder responses so a generic address like "CALLE SOLEDAT 4, VIC,
+# Spain" doesn't resolve to a CALLE SOLEDAT in Madrid.
+CATALONIA_BBOX: tuple[float, float, float, float] = (0.16, 40.52, 3.34, 42.86)
+
+
+def _query_photon(
+    address: str,
+    bbox: tuple[float, float, float, float] | None = None,
+) -> tuple[float, float] | None:
     """Photon (Komoot). Returns (lat, lon), None if no record, or raises
     :class:`GeocoderTransientError` on rate limits / network errors."""
+    params: dict[str, object] = {"q": address, "limit": 1, "lang": "en"}
+    if bbox is not None:
+        # Photon expects "minLon,minLat,maxLon,maxLat".
+        params["bbox"] = ",".join(f"{v:.4f}" for v in bbox)
     try:
         r = requests.get(
             PHOTON_URL,
-            params={"q": address, "limit": 1, "lang": "en"},
+            params=params,
             headers={"User-Agent": USER_AGENT},
             timeout=15,
         )
@@ -122,17 +135,26 @@ def _query_photon(address: str) -> tuple[float, float] | None:
     return float(coords[1]), float(coords[0])
 
 
-def _query_nominatim(address: str) -> tuple[float, float] | None:
+def _query_nominatim(
+    address: str,
+    bbox: tuple[float, float, float, float] | None = None,
+) -> tuple[float, float] | None:
     """Nominatim (OpenStreetMap)."""
+    params: dict[str, object] = {
+        "q": address,
+        "format": "json",
+        "limit": 1,
+        "countrycodes": "es",
+    }
+    if bbox is not None:
+        # Nominatim expects "minLon,maxLat,maxLon,minLat" (top-left, bottom-right).
+        west, south, east, north = bbox
+        params["viewbox"] = f"{west},{north},{east},{south}"
+        params["bounded"] = 1
     try:
         r = requests.get(
             NOMINATIM_URL,
-            params={
-                "q": address,
-                "format": "json",
-                "limit": 1,
-                "countrycodes": "es",
-            },
+            params=params,
             headers={"User-Agent": USER_AGENT},
             timeout=15,
         )
@@ -155,7 +177,10 @@ PROVIDERS: list[tuple[str, callable]] = [
 ]
 
 
-def _query_address(address: str) -> tuple[float, float] | None:
+def _query_address(
+    address: str,
+    bbox: tuple[float, float, float, float] | None = None,
+) -> tuple[float, float] | None:
     """Try every provider until one returns a hit. Raises
     :class:`GeocoderTransientError` only if **every** provider erred
     transiently (i.e. we never got an authoritative answer).
@@ -164,7 +189,7 @@ def _query_address(address: str) -> tuple[float, float] | None:
     confirmed_miss = False
     for name, fn in PROVIDERS:
         try:
-            result = fn(address)
+            result = fn(address, bbox)
         except GeocoderTransientError as e:
             last_error = e
             continue
