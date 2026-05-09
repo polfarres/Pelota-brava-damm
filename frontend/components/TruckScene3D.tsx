@@ -9,7 +9,7 @@
 
 import { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { Billboard, OrbitControls, Text } from '@react-three/drei';
 import { colorForSku } from '@/lib/colors';
 import type { Plan } from '@/lib/types';
 
@@ -132,8 +132,8 @@ export default function TruckScene3D({
                 <meshStandardMaterial color={isCurrent ? '#fde68a' : '#a16207'} />
               </mesh>
 
-              {/* Slot label floating above */}
-              <SlotLabel slotId={slotId} y={cargoHeight + 0.15} />
+              {/* Slot label floating above the cargo roof */}
+              <SlotLabel slotId={slotId} y={cargoHeight + 0.45} highlighted={isCurrent} />
 
               {/* Highlight ring for current slot */}
               {isCurrent && (
@@ -335,24 +335,42 @@ function PalletStack({
   );
 }
 
-function SlotLabel({ slotId, y }: { slotId: string; y: number }) {
-  // Use a thin red disc as a marker; text labels in r3f require Drei <Text>
-  // and a font asset, which is overkill for the demo.
+function SlotLabel({
+  slotId,
+  y,
+  highlighted,
+}: {
+  slotId: string;
+  y: number;
+  highlighted?: boolean;
+}) {
+  // Floating slot label: a coloured disc (red if currently being filled,
+  // dark grey otherwise) topped with the slot id rendered as a 3D-text
+  // billboard so it stays readable as the user orbits the camera.
   return (
-    <mesh position={[0, y, 0]}>
-      <sphereGeometry args={[0.07, 16, 16]} />
-      <meshStandardMaterial color="#E30613" emissive="#E30613" emissiveIntensity={0.4} />
-      <SlotLabelText slotId={slotId} />
-    </mesh>
+    <group position={[0, y, 0]}>
+      <Billboard>
+        <mesh>
+          <circleGeometry args={[0.18, 32]} />
+          <meshBasicMaterial color={highlighted ? '#E30613' : '#1F2937'} />
+        </mesh>
+        <mesh position={[0, 0, 0.001]}>
+          <circleGeometry args={[0.16, 32]} />
+          <meshBasicMaterial color={highlighted ? '#fff' : '#F8FAFC'} />
+        </mesh>
+        <Text
+          position={[0, 0, 0.002]}
+          fontSize={0.18}
+          color={highlighted ? '#E30613' : '#1F2937'}
+          anchorX="center"
+          anchorY="middle"
+          fontWeight="bold"
+        >
+          {slotId}
+        </Text>
+      </Billboard>
+    </group>
   );
-}
-
-function SlotLabelText({ slotId }: { slotId: string }) {
-  // Placeholder: SlotLabel uses the marker only; the text overlay lives
-  // in the parent <TruckLoadDiagram>'s SVG variant. Keeping it as a
-  // no-op here so we don't pull a font into the bundle.
-  void slotId;
-  return null;
 }
 
 function SideLabel({
