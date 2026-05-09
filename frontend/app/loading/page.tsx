@@ -50,7 +50,7 @@ interface LoadStep {
   customer_name: string;
   stop_sequence: number | null;
   isStapleColumn: boolean;
-  lines: { ubicacion: string | null; sku: string; description: string; quantity: number; unit: string }[];
+  lines: { ubicacion: string | null; sku: string; description: string; quantity: number; unit: string; ce?: number }[];
   totalCe: number;
 }
 
@@ -195,31 +195,59 @@ export default function LoadingPage() {
   const steps = useMemo(() => buildLoadingSteps(plan), [plan]);
   const totalSteps = steps.length;
 
-  // Per-slot cell counter: each completed step adds round(step.totalCe)
-  // cells to its slot (capped at 60 = TOTAL_CELLS). Cells are filled
-  // in load order (bottom-back → top-front), so subsequent steps for
-  // the same slot extend the visible pile incrementally.
+  // Cell-count per step is derived from the *displayed* (rounded) lines,
+  // not from the raw layer CE — otherwise a step that says "1 Barril
+  // ED30 + 1 Barril TU20" would render 10 cells when it should render
+  // ceil(4 + 2.5) = 7. One cell = one CE-equivalent of one product.
+  function cellsPerStep(s: { lines: { ce?: number; quantity: number }[] }): number {
+    let total = 0;
+    for (const l of s.lines) {
+      total += Math.max(1, Math.round((l.ce ?? 1) * l.quantity));
+    }
+    return total;
+  }
+
+  // Per-slot ordered cell list, built from each step's rounded lines.
+  // Each cell carries its SKU + customer so the 3D scene can colour and
+  // group them. Subsequent steps for the same slot extend its list.
+  const cellsBySlot = useMemo(() => {
+    const map = new Map<string, { sku: string; customer_id: number | null }[]>();
+    for (const s of steps) {
+      const list = map.get(s.slotId) ?? [];
+      for (const line of s.lines) {
+        const count = Math.max(1, Math.round((line.ce ?? 1) * line.quantity));
+        for (let i = 0; i < count; i++) {
+          list.push({ sku: line.sku, customer_id: s.customer_id });
+        }
+      }
+      map.set(s.slotId, list);
+    }
+    // Cap each slot at 60 cells so the visualisation never overflows the
+    // 6×10 grid even if rounding accidentally produces more units.
+    for (const [k, v] of map) {
+      if (v.length > 60) map.set(k, v.slice(0, 60));
+    }
+    return map;
+  }, [steps]);
+
+  // How many cells of each slot are visible at the current activeStep.
   const loadedCellsPerSlot = useMemo(() => {
     const counts = new Map<string, number>();
     for (let i = 0; i <= activeStep; i++) {
       const s = steps[i];
       if (!s) continue;
-      const add = Math.max(1, Math.min(60, Math.round(s.totalCe)));
-      counts.set(s.slotId, Math.min(60, (counts.get(s.slotId) ?? 0) + add));
+      const target = cellsBySlot.get(s.slotId)?.length ?? 0;
+      counts.set(s.slotId, Math.min(target, (counts.get(s.slotId) ?? 0) + cellsPerStep(s)));
     }
     return counts;
-  }, [steps, activeStep]);
+  }, [steps, activeStep, cellsBySlot]);
 
-  // A slot counts as "fully loaded" when we've put in at least round(sum
-  // totalCe of all its steps) cells. Used by the counter chip.
+  // A slot is "fully loaded" when its cell count == its total cells.
   const slotFullCellsTarget = useMemo(() => {
     const target = new Map<string, number>();
-    for (const s of steps) {
-      const add = Math.max(1, Math.min(60, Math.round(s.totalCe)));
-      target.set(s.slotId, Math.min(60, (target.get(s.slotId) ?? 0) + add));
-    }
+    for (const [slotId, list] of cellsBySlot) target.set(slotId, list.length);
     return target;
-  }, [steps]);
+  }, [cellsBySlot]);
 
   const slotsFullyLoaded = useMemo(() => {
     let n = 0;
@@ -263,6 +291,7 @@ export default function LoadingPage() {
           </div>
           <TruckScene3D
             plan={plan}
+            cellsBySlot={cellsBySlot}
             loadedCellsPerSlot={loadedCellsPerSlot}
             currentSlotId={currentStep?.slotId ?? null}
           />

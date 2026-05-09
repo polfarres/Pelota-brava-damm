@@ -11,14 +11,21 @@ import { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { colorForSku } from '@/lib/colors';
-import type { Plan, StackLayer } from '@/lib/types';
+import type { Plan } from '@/lib/types';
+
+export interface Cell {
+  sku: string;
+  customer_id: number | null;
+}
 
 interface Props {
   plan: Plan;
+  // Per-slot ordered cell list (built from the rounded step.lines so
+  // each cell == 1 CE of one product, in the picker's load order).
+  cellsBySlot: Map<string, Cell[]>;
   // Per-slot count of cells already loaded. The first N cells of each
-  // slot's `buildPalletCells()` output are rendered. This makes the
-  // 3D fill update incrementally as the picker advances through
-  // steps — each step adds round(step.totalCe) cells.
+  // slot's list are rendered. This makes the 3D fill update
+  // incrementally as the picker advances through steps.
   loadedCellsPerSlot: Map<string, number>;
   // Slot currently being filled (highlighted).
   currentSlotId: string | null;
@@ -35,6 +42,7 @@ function isStapleSlot(pa: { lines: { sku: string }[] } | undefined): boolean {
 
 export default function TruckScene3D({
   plan,
+  cellsBySlot,
   loadedCellsPerSlot,
   currentSlotId,
 }: Props) {
@@ -107,14 +115,14 @@ export default function TruckScene3D({
         {/* Cargo bay walls (semi-transparent so loaded boxes are visible) */}
         <CargoBay length={cargoLen} width={cargoWidth} height={cargoHeight} />
 
-        {/* Pallet slots + loaded layers */}
+        {/* Pallet slots + loaded cells */}
         {slotLayout.map(({ slotId, row, col }) => {
           const x = -cargoLen / 2 + palletDepth / 2 + col * palletDepth;
           const z = -cargoWidth / 2 + palletWidth / 2 + row * palletWidth;
           const pa = plan.pallet_assignments.find((p) => p.slot_id === slotId);
           const isCurrent = slotId === currentSlotId;
           const staple = isStapleSlot(pa as { lines: { sku: string }[] } | undefined);
-          const stack: StackLayer[] = pa?.stack ?? [];
+          const slotCells = cellsBySlot.get(slotId) ?? [];
 
           return (
             <group key={slotId} position={[x, 0, z]}>
@@ -135,10 +143,10 @@ export default function TruckScene3D({
                 </mesh>
               )}
 
-              {/* Stack: render the first N cells based on loaded count */}
+              {/* Pallet content: render the first N cells based on loaded count */}
               <PalletStack
                 slotId={slotId}
-                stack={stack}
+                cells={slotCells}
                 isStaple={staple}
                 loadedCells={loadedCellsPerSlot.get(slotId) ?? 0}
                 width={palletWidth - 0.2}
@@ -217,79 +225,17 @@ function CargoBay({
 
 // Pallet grid: 10 boxes per level (4 + 4 + 2) × 6 levels = 60 boxes max.
 //
-// User-spec footprint per level:
+// Per-level footprint (the user's spec):
 //   row 0:  [ ][ ][ ][ ]    cellInLevel 0..3   (back, near cabin)
 //   row 1:  [ ][ ][ ][ ]    cellInLevel 4..7   (middle)
-//   row 2:    [ ][ ]        cellInLevel 8..9   (front, short row, centered)
+//   row 2:    [ ][ ]        cellInLevel 8..9   (front, short row, centred)
 //
-// LIFO loading order = cell index ascending: bottom level first, back
-// row first within a level. This way the LAST-delivered customer's
-// boxes end up at the bottom-back (least accessible) and the FIRST
-// customer's at the top, mirroring A-38.
+// Load order = cell index ascending: bottom level first, back row
+// first within a level. The LAST-delivered customer's boxes end up
+// at the bottom-back (least accessible) and the FIRST customer's
+// at the top, mirroring A-38.
 const PALLET_LEVELS = 6;
 const CELLS_PER_LEVEL = 10;
-const TOTAL_CELLS = PALLET_LEVELS * CELLS_PER_LEVEL;
-
-interface PalletCell {
-  level: number;          // 0 = bottom of the pallet
-  cellInLevel: number;    // 0..9
-  sku: string;
-  customer_id: number;
-  stop_sequence: number;
-  layerKey: string;       // `${slotId}::${stop_sequence}`
-}
-
-function buildPalletCells(slotId: string, stack: StackLayer[]): PalletCell[] {
-  // Walk the stack in load order: stack is TOP→BOTTOM so we reverse
-  // to get bottom (last-delivered) first.
-  const reversed = [...stack].reverse();
-  const cells: PalletCell[] = [];
-  let cursor = 0;
-
-  for (const layer of reversed) {
-    if (cursor >= TOTAL_CELLS) break;
-    const layerCells = Math.max(
-      1,
-      Math.min(TOTAL_CELLS - cursor, Math.round(layer.ce)),
-    );
-
-    // Distribute the layer's cells across its SKUs proportionally
-    // to each SKU's CE share.
-    const skuCe = new Map<string, number>();
-    for (const ln of layer.lines) {
-      skuCe.set(ln.sku, (skuCe.get(ln.sku) ?? 0) + (ln.ce ?? 1) * ln.quantity);
-    }
-    const totalCe = [...skuCe.values()].reduce((a, b) => a + b, 0) || 1;
-    const perSku: { sku: string; count: number }[] = [];
-    for (const [sku, ce] of skuCe) {
-      perSku.push({ sku, count: Math.max(1, Math.round((ce / totalCe) * layerCells)) });
-    }
-    let allocated = perSku.reduce((s, p) => s + p.count, 0);
-    while (allocated > layerCells && perSku.length) {
-      // Trim from the largest bucket — never below 1 cell.
-      const i = perSku.reduce((mi, p, j) => (p.count > perSku[mi].count ? j : mi), 0);
-      if (perSku[i].count <= 1) break;
-      perSku[i].count--;
-      allocated--;
-    }
-
-    const layerKey = `${slotId}::${layer.stop_sequence}`;
-    for (const { sku, count } of perSku) {
-      for (let i = 0; i < count && cursor < TOTAL_CELLS; i++) {
-        cells.push({
-          level: Math.floor(cursor / CELLS_PER_LEVEL),
-          cellInLevel: cursor % CELLS_PER_LEVEL,
-          sku,
-          customer_id: layer.customer_id,
-          stop_sequence: layer.stop_sequence,
-          layerKey,
-        });
-        cursor++;
-      }
-    }
-  }
-  return cells;
-}
 
 /** Returns ``[localX, localY, localZ]`` and ``[sx, sy, sz]`` (size) for
  * a cell on a pallet of footprint ``depth × width``. The pallet's local
@@ -332,7 +278,7 @@ function cellTransform(
 
 function PalletStack({
   slotId,
-  stack,
+  cells,
   isStaple,
   loadedCells,
   width,
@@ -340,7 +286,7 @@ function PalletStack({
   cargoHeight,
 }: {
   slotId: string;
-  stack: StackLayer[];
+  cells: Cell[];
   isStaple: boolean;
   loadedCells: number;
   width: number;
@@ -348,40 +294,37 @@ function PalletStack({
   cargoHeight: number;
 }) {
   const palletTop = 0.16;
-  // Each cell is one standard caja. Total stack height = 6 cells.
   const cellHeight = (cargoHeight - 0.2) / PALLET_LEVELS;
 
-  const cells = useMemo(() => buildPalletCells(slotId, stack), [slotId, stack]);
-
   // Render the first N cells in LIFO load order (bottom-back → top-front).
-  const visibleCells = cells.slice(0, Math.min(cells.length, Math.max(0, loadedCells)));
+  const total = Math.min(cells.length, PALLET_LEVELS * CELLS_PER_LEVEL);
+  const visibleCount = Math.max(0, Math.min(total, loadedCells));
 
   // Staple star floats once the column is *fully* loaded.
-  const stapleFullyLoaded = isStaple && visibleCells.length >= cells.length && cells.length > 0;
+  const stapleFullyLoaded = isStaple && visibleCount >= total && total > 0;
+
+  const meshes: React.ReactNode[] = [];
+  for (let i = 0; i < visibleCount; i++) {
+    const cell = cells[i];
+    const level = Math.floor(i / CELLS_PER_LEVEL);
+    const cellInLevel = i % CELLS_PER_LEVEL;
+    const { pos, size } = cellTransform(level, cellInLevel, depth, width, cellHeight, palletTop);
+    meshes.push(
+      <mesh
+        key={`${slotId}-${i}`}
+        castShadow
+        receiveShadow
+        position={pos}
+      >
+        <boxGeometry args={size} />
+        <meshStandardMaterial color={colorForSku(cell.sku)} />
+      </mesh>,
+    );
+  }
 
   return (
     <group>
-      {visibleCells.map((c) => {
-        const { pos, size } = cellTransform(
-          c.level,
-          c.cellInLevel,
-          depth,
-          width,
-          cellHeight,
-          palletTop,
-        );
-        return (
-          <mesh
-            key={`${slotId}-${c.level}-${c.cellInLevel}`}
-            castShadow
-            receiveShadow
-            position={pos}
-          >
-            <boxGeometry args={size} />
-            <meshStandardMaterial color={colorForSku(c.sku)} />
-          </mesh>
-        );
-      })}
+      {meshes}
       {stapleFullyLoaded && (
         <mesh position={[0, palletTop + cargoHeight - 0.05, 0]}>
           <sphereGeometry args={[0.12, 16, 16]} />
