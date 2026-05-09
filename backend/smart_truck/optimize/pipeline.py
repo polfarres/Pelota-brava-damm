@@ -34,6 +34,7 @@ from smart_truck.models import (
     VehicleProfileName,
 )
 from smart_truck.optimize.load import (
+    LoadPlan,
     StopDemand,
     pack_truck,
 )
@@ -408,19 +409,34 @@ def plan(
             )
         )
 
-    # 5. Pack load. If returns infeasible later, we'll retry with higher
-    #    familiarity weight (which usually mimics the as-is order).
-    envase_lines = _envase_lines_from_paperwork()
+    # 5. Pack load.
+    #
+    # Under v2 (A-36): no envase zone, no separate envase_lines stream.
+    # Outbound envases ride along with the case-pallets they belong to,
+    # which means they aren't passed in here — the load packer just
+    # consumes per-stop demand. The pipeline keeps a small fudge factor
+    # to account for an outbound-envase tax in the capacity check, since
+    # we don't yet attribute envases per stop (deferred to v3 with
+    # Albarán parsing).
+    OUTBOUND_ENVASE_TAX = 0.0  # set to e.g. 0.10 to reserve 10% of capacity
 
     # If demand exceeds capacity, scale every stop's line quantities
     # uniformly to fit. This keeps the demo feasible when the recorded
     # CE values run higher than the modelled vehicle capacity (DR-010 +
     # A-31 are still being calibrated).
-    total_demand_ce = sum(s.ce_total for s in resequenced) + sum(
-        l.ce * l.quantity for l in envase_lines
-    )
-    if total_demand_ce > profile.total_capacity_ce:
-        scale = (profile.total_capacity_ce * 0.95) / total_demand_ce
+    #
+    # Under A-37 the slot-count budget is per-type: ceil(case/60) +
+    # ceil(barrel/60). Each type's ceil() can waste up to 60 CE, so we
+    # leave 60 CE of head-room per type present in the carga to avoid
+    # tripping the packer's slot-count check after scaling.
+    total_demand_ce = sum(s.ce_total for s in resequenced)
+    effective_capacity = profile.total_capacity_ce * (1.0 - OUTBOUND_ENVASE_TAX)
+    has_case = any(any(l.unit not in {"Barril", "Tubo"} for l in s.lines) for s in resequenced)
+    has_barrel = any(any(l.unit in {"Barril", "Tubo"} for l in s.lines) for s in resequenced)
+    rounding_headroom = 60.0 * (int(has_case) + int(has_barrel))
+    safe_capacity = max(60.0, effective_capacity - rounding_headroom)
+    if total_demand_ce > safe_capacity:
+        scale = safe_capacity / total_demand_ce
         scaled: list[StopDemand] = []
         for s in resequenced:
             scaled_lines = [
@@ -441,18 +457,6 @@ def plan(
                 lines=scaled_lines,
             ))
         resequenced = scaled
-        envase_lines = [
-            DeliveredLine(
-                sku=l.sku,
-                description=l.description,
-                quantity=l.quantity * scale,
-                unit=l.unit,
-                ce=l.ce,
-                weight_kg=l.weight_kg * scale,
-                source_ubicacion=l.source_ubicacion,
-            )
-            for l in envase_lines
-        ]
         explanations.append(Explanation(
             target="stop", target_id="0",
             reason=(
@@ -464,10 +468,12 @@ def plan(
 
     used_familiarity = familiarity_weight
 
+    last_load_plan: "LoadPlan | None" = None
+
     def _try_pack_and_returns(stop_list: list[StopDemand]) -> tuple[list[SlotAssignment], list]:
-        load_plan = pack_truck(
-            profile, stop_list, envase_lines=envase_lines
-        )
+        nonlocal last_load_plan
+        load_plan = pack_truck(profile, stop_list)
+        last_load_plan = load_plan
         # Returns simulation: per-stop returnable CE.
         is_ret = _is_returnable_map()
         per_stop_lines = {s.sequence: s.lines for s in stop_list}
@@ -524,10 +530,21 @@ def plan(
             slot_count_by_stop[seq] = slot_count_by_stop.get(seq, 0) + 1
 
     stop_plans: list[StopPlan] = []
+    # Per-stop delivered_lines: pull from the SlotAssignment.stack layers
+    # actually allocated to this stop (FR-006 v2). This replaces the v1
+    # behaviour of dumping the whole carga's lines on every StopPlan,
+    # which made delivered_lines effectively unusable for downstream
+    # consumers.
+    stop_to_lines: dict[int, list[DeliveredLine]] = {}
+    for sa in slot_assignments:
+        for layer in sa.stack:
+            stop_to_lines.setdefault(layer.stop_sequence, []).extend(layer.lines)
+
     for stop in resequenced:
         info = geo.get(stop.customer_id, ("?", "", None, None))
+        delivered_lines = stop_to_lines.get(stop.sequence, list(stop.lines))
         # CE returnable estimate per A-35
-        returnable_ce_total = sum(l.ce * l.quantity for l in stop.lines)
+        returnable_ce_total = sum(l.ce * l.quantity for l in delivered_lines)
         zones_touched = max(1, slot_count_by_stop.get(stop.sequence, 1))
         stop_plans.append(StopPlan(
             sequence=stop.sequence,
@@ -540,7 +557,7 @@ def plan(
             time_window=None,
             payment_condition="CONTADO",
             proforma_total=Decimal(0),
-            delivered_lines=list(stop.lines),
+            delivered_lines=delivered_lines,
             returns_estimated_ce=round(returnable_ce_total * 0.60, 3),
             in_truck_zones_touched=zones_touched,
         ))
@@ -553,6 +570,24 @@ def plan(
             f"familiarity_weight={used_familiarity}."
         ),
     ))
+
+    if last_load_plan is not None:
+        n_case = sum(
+            1 for sa in last_load_plan.slot_assignments if sa.pallet_type == "CASE"
+        )
+        n_barrel = sum(
+            1 for sa in last_load_plan.slot_assignments if sa.pallet_type == "BARREL"
+        )
+        explanations.append(Explanation(
+            target="stop", target_id="0",
+            reason=(
+                f"Stack-LIFO load packer (v2 / A-36..A-38) placed cargo into "
+                f"{n_case} case-pallet(s) + {n_barrel} barrel-pallet(s); "
+                f"estimated driver time {last_load_plan.estimated_driver_minutes:.0f} min "
+                f"across all stops "
+                f"(util {last_load_plan.utilisation_pct:.0f}% of {last_load_plan.total_capacity_ce:.0f} CE)."
+            ),
+        ))
 
     return Plan(
         ruta=ruta,

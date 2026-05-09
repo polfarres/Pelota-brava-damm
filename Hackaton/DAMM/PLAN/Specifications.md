@@ -646,32 +646,79 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Owner**: backend dev A.
 - **Depends on**: FR-003.
 
-### FR-006 — Hybrid load packer
-- **Input**: optimised stop sequence (FR-005), per-stop delivery lines (FR-004), truck pallet grid, envase outbound list.
-- **Truck grids** (locked 2026-05-09):
+### FR-006 — Stack-LIFO load packer (rewritten 2026-05-09 evening for v2)
+
+**Supersedes** the v1 hybrid packer described in earlier revisions of
+this file. v1's envase zone, fungible-slot model, and flat-bag slot
+contents are all replaced by the v2 invariants A-36, A-37, A-38.
+
+- **Input**: optimised stop sequence (FR-005), per-stop delivery lines
+  (FR-004), `VehicleProfile` (DR-008). The legacy ``envase_lines``
+  argument is preserved on `pack_truck` for signature compat but is
+  ignored under A-36.
+- **Truck grids** (DR-008 — unchanged):
   - **Furgoneta (3-pallet van)**: 1×3 single row.
-  - **6-pallet truck**: 2×3 (2 wide × 3 long).
-  - **8-pallet truck**: 2×4.
-  - Pallet footprint: **EUR 80×120 cm**.
-  - **Vertical stack height per pallet position: ≤ 1.80 m** (cases / barrels stack vertically inside one slot up to this limit).
-  - **Barrels (BRL30, BRL20, TB8)**: each barrel occupies one pallet slot logically; multiple barrels stack vertically within the slot up to the 1.80 m limit.
-- **Output**: `LoadPlan` with:
-  - For each truck pallet position (e.g. `P1` … `P6`): a list of (sku, qty, unit, source_ubicacion) plus the customer(s) it belongs to.
-  - For each customer: which pallet(s) and which side (left curtain / right curtain) holds their items.
-  - Envase outbound zone allocation.
-- **Algorithm** (heuristic):
-  1. Compute pallet-equivalents per stop, respecting the 1.80 m stacking ceiling. Mark whole-pallet stops vs. partial-pallet stops.
-  2. Allocate whole-pallet stops to truck positions in **reverse** of delivery order (LIFO).
-  3. Pack partial stops onto consolidator pallets, each consolidator dedicated to a contiguous group of partial stops. Inside a consolidator: SKU-grouped, heaviest at bottom.
-  4. Allocate the envases zone to one or two trailing pallet positions (closest to the rear door).
-  5. Verify lateral reachability: every stop must touch at least one curtain face when its turn comes.
-- **Acceptance** (revised — A-30, A-31):
-  - **Σ slot.ce_used ≤ slot.capacity_ce** for every slot. **No weight constraint** is enforced (A-30).
-  - **Σ vehicle.ce_used ≤ vehicle.total_capacity_ce**.
-  - Every stop's items are reachable on its turn via `is_reachable` (FR-006a).
-  - Every stop is contiguous in pallet space (no fragmentation across non-adjacent pallets unless quantity forces it).
-- **Owner**: backend dev A.
+  - **6-pallet truck**: 2×3, partitioned by central *reixa*.
+  - **8-pallet truck**: 2×4, partitioned by central *reixa*.
+  - **8-pallet w/ tail-lift**: 2×4 with rear access via *ascensor*.
+  - Pallet footprint: EUR 80×120 cm. Vertical stack ≤ 1.80 m per slot.
+- **Output**: `LoadPlan` with one `SlotAssignment` per pallet position:
+  - `slot_id` (matches Vehicle YAML).
+  - `pallet_type ∈ {CASE, BARREL}` (A-37).
+  - `stack: list[StackEntry]` ordered TOP→BOTTOM = ascending delivery
+    sequence (A-38).
+  - `contents` (flattened top-to-bottom for legacy consumers).
+  - `ce_used / ce_capacity`.
+  - `is_envase_zone = False` always (A-36).
+  - `LoadPlan.estimated_driver_minutes` — sum of per-stop driver time
+    estimates from the cost model below.
+
+- **Algorithm** (7 phases — full description in
+  `optimize/load.py` docstring):
+  1. **Categorise** each stop's lines into CASE vs BARREL by UoM (A-37).
+  2. **Pallet-count budget**: `n_case = ⌈Σ case_ce / 60⌉`,
+     `n_barrel = ⌈Σ barrel_ce / 60⌉`. Reject if total exceeds
+     `len(profile.slots)`.
+  3. **Slot-type heuristic**: walk slots in `lifo_order_per_face`
+     (deepest-first); pick the *shallowest-end* `n_barrel` slots
+     accepting BARREL (heavy → close to access face); rest go to CASE.
+  4. **Customer-to-pallet assignment** = MILP with PuLP/CBC.
+     Variables: `x[c, s] ∈ {0, 1}` (customer in slot), `seq_min[s]`,
+     `seq_max[s]`, `pal[s]`. Constraints: each customer → exactly one
+     slot; capacity 60 CE per slot; type compatibility (zeroed
+     up-front). Objective: minimise `Σ_s (seq_max[s] - seq_min[s])`
+     with a 0.01 tie-break per opened pallet. Time limit 10 s; on
+     timeout / infeasibility, fall back to a reverse-sequential
+     greedy heuristic. Pre-process: split customers >60 CE into
+     virtual sub-customers sharing the same `seq` so all virtual
+     customers fit in one slot.
+  5. **Within-pallet stack order** = ascending delivery sequence
+     (A-38). Materialise `stack[]` top-to-bottom.
+  6. **Verify access** with the FR-006a check (re-used unchanged from
+     v1: `verify_access`).
+  7. **Driver-minutes estimate** per stop:
+     `t = T_BASE + T_OPEN·n_pallets + T_ROT·n_rotations + T_PER_LINE·n_lines`
+     with `(T_BASE, T_OPEN, T_ROT, T_PER_LINE) = (5, 1, 0.05, 0.4)` min.
+     `n_rotations` for stop *k* = sum of CE × 0.6 over earlier-delivered
+     customer layers above *k*'s layer in shared pallets (the
+     accumulated empties from A-35 returns).
+
+- **Acceptance** (locked 2026-05-09 evening):
+  - `is_envase_zone == False` for every slot (A-36).
+  - `pallet_type` set on every used slot; no slot mixes barrel and case
+    cargo (A-37).
+  - Each used slot's `stack` is sorted ascending by `stop_sequence`
+    (A-38).
+  - `Σ slot.ce_used ≤ slot.ce_capacity` for every slot. No weight
+    constraint (A-30).
+  - All used slots pass `verify_access` (FR-006a).
+  - `LoadPlan.estimated_driver_minutes > 0` whenever any cargo is
+    packed.
+- **Owner**: backend.
 - **Depends on**: FR-005, DR-008, DR-009, DR-010.
+- **Reference implementation**: `backend/smart_truck/optimize/load.py`
+  (~700 LOC). Public surface: `pack_truck`, `verify_access`,
+  `StopDemand`, `LoadPlan`, `LoadPlanError`, `CE_PER_PALLET`.
 
 ### FR-006a — Access-driven feasibility check (extends FR-006)
 
@@ -688,24 +735,40 @@ The packer signature changes from `(stops, pallet_grid)` to `(stops, vehicle: Ve
 - Furgoneta plans pass `lifo_order_per_face[REAR]` strictly.
 - Side-curtain truck plans report `unload_face_per_stop[stop_id] ∈ {LEFT, RIGHT}`.
 
-### FR-007 — Returns / free-space tracker
-- **Input**: `LoadPlan` (FR-006), per-stop expected returns (estimated from delivered units × global 60 % return rate per A-35), envase outbound zone.
-- **Return rate** (locked 2026-05-09 — supersedes original A-07):
-  - **Flat 60 % global** (A-35), applied to outbound CE per stop. Pitch-only nuance: empirically lower in summer, higher in winter.
-- **Output**: a stop-by-stop free-space timeline. For each stop *k*, report: per-slot CE available, returns picked up (CE), fits/overflows.
-- **Acceptance**: For the demo carga, the slot-typed free-space curve is non-negative at every stop. If not, the optimiser is signalled to re-order (FR-005 loop).
-- **Owner**: backend dev B.
-- **Depends on**: FR-006, DR-008.
+### FR-007 — Per-pallet returns absorption (rewritten 2026-05-09 evening for v2)
 
-### FR-007a — Slot-typed return absorption (extends FR-007)
+**Supersedes** the v1 envase-zone-pool model. Under A-36 there is no
+dedicated envase zone; empties absorb into the freed space of the same
+pallet position the cargo just left.
 
-`FreeSpaceFrame` becomes a list of `(slot_id, ce_free, accepts_returns_of)`. Returns are placed via the same `first_compatible_slot` function (FR-006a) but consult `slot.can_host_returns_of` instead of `slot.accepts`.
+- **Input**: `LoadPlan` (FR-006 v2), per-stop returnable CE volumes.
+- **Return rate**: flat 60 % global (A-35).
+- **Output**: list of `ReturnsTrace`, one per stop, with
+  `cumulative_returns_ce`, `cumulative_freed_ce`, `free_ce_after`.
+- **Per-stop freed CE** is now read from `SlotAssignment.stack`
+  granularity: when stop *k* is delivered, all stack layers with
+  `stop_sequence == k` free their CE. v1-style legacy SlotAssignments
+  with `is_envase_zone=True` are still understood (envase zone freed
+  from sequence 0) for backward compat.
+- **Acceptance**:
+  - `cumulative_returns ≤ cumulative_freed` at every stop (always true
+    at 60 % rate × full-truck-out invariant; defensive
+    `ReturnsInfeasibleError` raised only on programming error).
+  - `free_ce_after` monotonically grows by `0.4 × delivered_ce` per
+    stop, ending at `0.4 × total_outbound_ce` after the last stop.
+- **Reference implementation**:
+  `backend/smart_truck/optimize/returns.py`. Public surface:
+  `simulate_returns`, `estimate_returnable_ce_per_stop`,
+  `ReturnsInfeasibleError`, `RETURN_RATE_FLAT`.
 
-**Acceptance additions**:
-- Per-frame `Σ slot.ce_used ≤ vehicle.total_capacity_ce` — the **only** capacity constraint (A-30).
-- `KEG_EMPTY` returns only into `FLOOR_KEG` slots.
-- `BRL` returns prefer freed `PALLET_FLOOR` slots over the envase zone (so the envase zone stays available for genuine outbound envases).
-- Returns rate model: flat 60 % per A-35 (no per-class breakdown).
+### FR-007a — Slot-typed return absorption (deprecated 2026-05-09 evening)
+
+The slot-typed return absorption originally extended FR-007 to route
+returns into the most appropriate slot type (e.g., empty kegs into
+`FLOOR_KEG` slots). Under v2 this is implicit: returns flow into the
+freed space of the *same* pallet that delivered the corresponding
+cargo, so type matching is automatic by construction. Kept here as
+context for v3 if multi-slot rebalancing of returns becomes needed.
 
 ### FR-008 — Plan pipeline
 - **Input**: `(ruta_id, fecha)` tuple.
@@ -847,6 +910,9 @@ Most of the table below was resolved in the user-led decision session on 2026-05
 | A-33 | ✅ Locked 2026-05-09 | **6P (×11, 2×3) and 8P (×4, 2×4) trucks**: open *only* from the two side curtains, with a **central partition (reixa)**. Left-row pallets are reachable only from LEFT; right-row pallets only from RIGHT; no cross-row access; no rear access. Within a row, all pallets are equally reachable along the curtain length. |
 | A-34 | ✅ Locked 2026-05-09 | **8P + tail-lift variant (×4, 2×4)**: as A-33, *plus* rear doors with an `ascensor` (tail-lift). Slots are reachable from both their side curtain and from REAR (with rear-blocking adjacency: rearmost pallets unblock first). Modelled as the `TRUCK_8P_LIFT` profile in DR-008. |
 | A-35 | ✅ Locked 2026-05-09 | **Returns rate = 60 % flat global** (replaces the per-class A-07). Applied to outbound CE per stop. Pitch-only nuance: empirically lower in summer, higher in winter; we don't model seasonality in v1. |
+| A-36 | ✅ Locked 2026-05-09 (evening) | **No envase zone — truck leaves Mollet 100 % full of outbound product.** The dedicated empties slot of v1 is removed. Outbound envases (`Carga envases` SKUs) ride along with delivered cases on case-pallets — they're physically EUR-pallet stackable. Returns absorb opportunistically into the freed space inside each pallet position as deliveries happen; at 60 % return rate (A-35) the math always fits. |
+| A-37 | ✅ Locked 2026-05-09 (evening) | **Barrel/case segregation per pallet.** Each truck pallet position takes a single `pallet_type ∈ {CASE, BARREL}` for one route. Cases and barrels never share a pallet (physical stacking is forbidden). UoM-to-type mapping: `Barril, Tubo` → BARREL; `Caja, Pack, Botella, Unidad, Lat` → CASE. |
+| A-38 | ✅ Locked 2026-05-09 (evening) | **Within-pallet stack order = ascending delivery sequence (top = first delivered).** Inside each pallet the customer cluster is stacked so that the next stop's items sit on top of the next-next stop's, and so on. The driver lifts the top off without rotation when their turn comes. Returns from earlier-delivered customers go back on top of the freed space, and may impose rotation cost for subsequent customers in the same pallet — that rotation cost is what FR-006/v2 minimises. |
 
 ---
 

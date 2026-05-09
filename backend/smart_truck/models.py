@@ -86,12 +86,48 @@ class StopPlan:
     in_truck_zones_touched: int = 0  # drives unload-time KPI
 
 
+PalletType = Literal["CASE", "BARREL"]
+
+
+@dataclass
+class StackEntry:
+    """One layer in a pallet stack — the cargo destined for one stop.
+
+    The :class:`SlotAssignment.stack` list is ordered from
+    **TOP** (loaded last, delivered first — index 0) to
+    **BOTTOM** (loaded first, delivered last). This matches the
+    reverse-LIFO discipline of A-38: when the driver opens the curtain
+    at a stop, that stop's items are at the top of the pallet, requiring
+    minimum rotation to reach.
+    """
+
+    stop_sequence: int
+    customer_id: int
+    ce: float
+    lines: list[DeliveredLine]
+
+
 @dataclass
 class SlotAssignment:
-    """One pallet position / zone in the truck and what is loaded in it."""
+    """One pallet position in the truck and what is loaded in it.
+
+    Under the v2 load model (A-36, A-37, A-38):
+
+    - ``is_envase_zone`` is deprecated; v2 leaves the truck 100% full of
+      outbound product, so it is always ``False``. Kept for the field
+      shape stability with v1 consumers.
+    - ``pallet_type`` is set to ``"CASE"`` or ``"BARREL"`` per A-37
+      (mixed stacking is forbidden).
+    - ``stack`` is the explicit top-to-bottom layer list per A-38.
+      ``contents`` remains a flattened cargo list (top-to-bottom) for
+      consumers (KPI engine, Smart Hoja Carga emitter) that don't yet
+      use the stack metadata.
+    """
 
     slot_id: str  # references the Vehicle YAML's slots[].id
-    is_envase_zone: bool
+    is_envase_zone: bool = False  # deprecated under v2 (A-36)
+    pallet_type: PalletType | None = None  # A-37
+    stack: list[StackEntry] = field(default_factory=list)  # A-38, top-to-bottom
     stop_sequences: list[int] = field(default_factory=list)
     contents: list[DeliveredLine] = field(default_factory=list)
     ce_used: float = 0.0

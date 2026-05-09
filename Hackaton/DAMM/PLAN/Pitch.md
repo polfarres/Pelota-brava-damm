@@ -54,17 +54,22 @@ This is the *real* paperwork that left the Mollet office that morning. Every met
 
 > *(Switch to the live dashboard at `localhost:3000`. The 3D truck twin is the centerpiece.)*
 
-**"Smart Truck takes one route's orders and produces three things jointly: a stop sequence, a hybrid pallet plan, and a returns plan."**
+**"Smart Truck takes one route's orders and produces three things jointly: a stop sequence, a stack-LIFO pallet plan, and a returns plan."**
 
 **(1) Stop sequence** — *(point at map)* — "Optimised against time windows and the driver's habitual order. We respect tribal knowledge with a soft penalty against deviating from the printed route."
 
-**(2) Hybrid pallet plan** — *(point at 3D truck)* — "The truck is divided into client clusters in **reverse delivery order** — last stop is loaded first, deepest in the truck. Inside each cluster, items are SKU-grouped. That gives the warehouse a clean pick walk *and* the driver a clean unload."
+**(2) Stack-LIFO pallet plan** — *(point at 3D truck)* — "The truck leaves Mollet **100 % full** — no wasted space for empties. Each pallet position is *typed* — case-pallet or barrel-pallet — and within each pallet the customer cargo is stacked in *reverse delivery order*. The next stop's items are physically at the top of the pallet, ready to lift off. We solve the assignment as a mixed-integer program — minimising how spread out each customer's cargo is across pallets — and CBC finds the optimum in under a second on this scale."
 
-**(3) Returns plan** — *(scrub the 3D twin to mid-route)* — "As pallets go out, their slots free up. We reserve the rear zone for outbound empty crates — and that same zone absorbs the returnable empties on the way back. Nobody else models this."
+**(3) Returns plan** — *(scrub the 3D twin to mid-route)* — "As cargo goes out, each customer's empties go right back into the same pallet position the full cargo just left. **Sixty percent of delivered volume comes back as empties** — that's why the truck ends the day at forty percent capacity, by design. Nobody else models this."
 
 **Speaker notes**:
 - The 3D twin animation is the demo. If r3f goes sideways, fall back to the 2D top-down SVG (Track C has a fallback).
-- "Reverse delivery order" + "envase zone" are the two technically interesting ideas. Linger on these.
+- The four technically interesting ideas, in order of "lingering" priority:
+  1. *Truck leaves 100 % full* (A-36) — no envase gap.
+  2. *Within-pallet reverse-LIFO stacking* (A-38) — top = first delivered.
+  3. *Barrel/case segregation* (A-37) — physical reality respected.
+  4. *MILP customer-to-pallet assignment* — pitchable as "we solve it as an integer program".
+- If a judge asks "why MILP, why not heuristic?" → "Heuristic is ~1 % worse on cluster spread. MILP gives provable optimality in under a second. Both are wired; we use MILP, fall back to heuristic on time-out."
 
 ### Beat 4 — The punchline document (45 s)
 
