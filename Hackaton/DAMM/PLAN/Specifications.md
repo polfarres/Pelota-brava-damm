@@ -159,25 +159,27 @@ Use to map a customer to its `DR…` route and its associated driver.
 
 ### DR-002 — `Horarios Entrega.XLSX`
 
-Path: `Pelota-brava-damm/Hackaton/DAMM/Horarios Entrega.XLSX`. One sheet, 1,015 rows × 13 cols.
+Path: `Pelota-brava-damm/Hackaton/DAMM/Horarios Entrega.XLSX`. One sheet, 1,015 rows × 13 cols. **The file is complete: every customer × weekday combination is represented.**
 
-| Column | Type | Notes |
-|---|---|---|
-| `Deudor` | int | Customer ID. The first ~27 rows show 6-digit legacy IDs; from row 28 onwards it's the standard 10-digit `9100…` matching `Direcciones.Cliente`. **Filter out the legacy rows during ETL** — they're a small minority of the file. Verified with user 2026-05-09. |
-| `Organización ventas` | int | Always 235. Filter to this. |
-| `Canal distribución` | int | Always 1. |
-| `Sector` | int | Always 8. |
-| `Día semana` | int | 1=Mon … 7=Sun. **No Saturday in data** — confirm if Sat is closed everywhere or just absent (MQ-D-06). |
-| `Turno` | int | Always 1. |
-| `Nombre 1` | str | Customer name. |
-| `Descripción` | str | `DDI MOLLET`. |
-| `Descripción.1` | str | Channel label. |
-| `Descripción.2` | str | `DDI`. |
-| `Horario inicia a` | time | Window start. |
-| `Horario termina a` | time | Window end. |
-| `Cierre Si/No` | str/NaN | Closure flag. Mostly NaN. |
+Schema (verified with user 2026-05-09):
 
-240 customers have explicit windows; the other ~963 in `Direcciones` have none — assume open all working day or confirm policy (MQ-D-06).
+| Col | Header | Type | Notes |
+|---|---|---|---|
+| A | `Deudor` | int | Customer ID. Joins directly to `Direcciones.Cliente` (10-digit `9100…` IDs from row ~28 onwards; the small handful of leading 6-digit legacy rows can be dropped during ETL). |
+| B | `Organización ventas` | int | Irrelevant (always 235). |
+| C | `Canal distribución` | int | Irrelevant (always 1). |
+| D | `Sector` | int | Irrelevant (always 8). |
+| E | `Día semana` | int | **1 = Monday … 5 = Friday.** Saturday is absent because customers are closed; Sunday (7) appears for the few customers open then. |
+| F | `Turno` | int | Always 1. |
+| G | `Nombre 1` | str | Customer name. |
+| H–J | `Descripción*` | str | Labels (DDI / channel / DDI MOLLET). Informational. |
+| K | `Horario inicia a` | time | Window start. |
+| L | `Horario termina a` | time | Window end. |
+| M | `Cierre Si/No` | str/NaN | Closure flag. Mostly empty. |
+
+**Critical rule**: a row with `K = L = 00:00:00` means the customer **does NOT accept delivery on that weekday**. Treat it as a hard closure, not as an open window from midnight to midnight.
+
+There is therefore **no "default" window concept** — every (customer, weekday) is explicit. If a customer is missing from this file entirely, we treat them as unknown and surface a warning during ETL.
 
 Canonical type:
 ```python
@@ -439,11 +441,16 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 ### FR-002 — Geocoding
 - **Input**: `customers.parquet` rows missing lat/lon.
 - **Output**: same file with lat/lon filled.
+- **Provider** (locked 2026-05-09): **Nominatim** (OpenStreetMap), no key required.
+  - Endpoint: `https://nominatim.openstreetmap.org/search`
+  - Send a real `User-Agent` header (e.g. `smart-truck/0.1 (contact@muvyt.ai)`).
+  - Throttle to **1 req/sec** to respect the public usage policy.
+  - Region bias: pass `countrycodes=es`.
+  - Run as a one-off batch when the customer list is finalised (~20 min for 1,200 addresses); commit the resulting cache so teammates don't re-geocode.
 - **Acceptance**:
   - ≥ 95% of demo-route customers (those on DR0027) geocoded successfully.
-  - Cache file `backend/data/geo_cache.json` keyed by `f"{street}, {postcode} {city}"` so re-runs are free.
-  - Failure mode: log + skip; do not crash the ETL.
-- **Provider**: Mapbox/Google if MQ-T-02 grants a key, else Nominatim with 1 req/sec backoff.
+  - Cache file `backend/data/geo_cache.json` keyed by `f"{street}, {postcode} {city}, Spain"` — a hit returns instantly.
+  - Failure mode: log + skip + record `null` in the cache so we don't retry; do not crash the ETL.
 - **Owner**: backend dev A.
 - **Depends on**: FR-001.
 
@@ -469,13 +476,14 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Depends on**: FR-001, FR-002, FR-003, DR-005, DR-006, DR-007.
 
 ### FR-005 — Route optimiser (VRP-TW)
-- **Input**: list of stops (each with lat/lon, time window, demand in pallet-equivalents), depot, vehicle capacity.
+- **Input**: list of stops (each with lat/lon, time window per weekday, demand in pallet-equivalents), depot, vehicle capacity.
 - **Output**: ordered stop sequence with arrival ETAs.
 - **Solver**: Google OR-Tools `RoutingModel`.
 - **Constraints**:
   - Capacity dimension (pallet-equivalents).
-  - Time dimension with per-stop time windows + service time.
-  - Soft penalty on deviating from the as-is order (driver familiarity bias) — toggleable.
+  - Time dimension with per-stop time windows + service time. Stops where `K=L=00:00:00` for the chosen weekday are excluded from the route entirely.
+  - **Driver familiarity bias** (locked 2026-05-09): soft penalty on deviating from the as-is order, with a UI-toggleable weight ("familiar" vs "optimal" mode).
+- **Service time model** (locked 2026-05-09): `service_time_min = 10 + 2 * distinct_in_truck_zones_touched`. The hybrid load packer (FR-006) reduces zones-touched per stop, which is what materialises the unload-time KPI saving.
 - **Acceptance**:
   - Returns a feasible solution within 30 s wall-clock for 20 stops.
   - Respects all time windows or reports infeasibility with an explanation.
@@ -483,19 +491,26 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Depends on**: FR-003.
 
 ### FR-006 — Hybrid load packer
-- **Input**: optimised stop sequence (FR-005), per-stop delivery lines (FR-004), truck pallet grid (e.g. 6-pallet = 2×3, 8-pallet = 2×4), envase outbound list.
+- **Input**: optimised stop sequence (FR-005), per-stop delivery lines (FR-004), truck pallet grid, envase outbound list.
+- **Truck grids** (locked 2026-05-09):
+  - **Furgoneta (3-pallet van)**: 1×3 single row.
+  - **6-pallet truck**: 2×3 (2 wide × 3 long).
+  - **8-pallet truck**: 2×4.
+  - Pallet footprint: **EUR 80×120 cm**.
+  - **Vertical stack height per pallet position: ≤ 1.80 m** (cases / barrels stack vertically inside one slot up to this limit).
+  - **Barrels (BRL30, BRL20, TB8)**: each barrel occupies one pallet slot logically; multiple barrels stack vertically within the slot up to the 1.80 m limit.
 - **Output**: `LoadPlan` with:
   - For each truck pallet position (e.g. `P1` … `P6`): a list of (sku, qty, unit, source_ubicacion) plus the customer(s) it belongs to.
   - For each customer: which pallet(s) and which side (left curtain / right curtain) holds their items.
   - Envase outbound zone allocation.
 - **Algorithm** (heuristic):
-  1. Compute pallet-equivalents per stop. Mark whole-pallet stops vs. partial-pallet stops.
+  1. Compute pallet-equivalents per stop, respecting the 1.80 m stacking ceiling. Mark whole-pallet stops vs. partial-pallet stops.
   2. Allocate whole-pallet stops to truck positions in **reverse** of delivery order (LIFO).
   3. Pack partial stops onto consolidator pallets, each consolidator dedicated to a contiguous group of partial stops. Inside a consolidator: SKU-grouped, heaviest at bottom.
   4. Allocate the envases zone to one or two trailing pallet positions (closest to the rear door).
   5. Verify lateral reachability: every stop must touch at least one curtain face when its turn comes.
 - **Acceptance**:
-  - Total volume ≤ truck volume capacity.
+  - Total volume ≤ truck volume capacity (and per-position stack ≤ 1.80 m).
   - Total weight ≤ truck weight capacity.
   - Every stop's items are reachable on its turn (curtain + LIFO check).
   - Every stop is contiguous in pallet space (no fragmentation across non-adjacent pallets unless quantity forces it).
@@ -503,8 +518,13 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Depends on**: FR-005.
 
 ### FR-007 — Returns / free-space tracker
-- **Input**: `LoadPlan` (FR-006), per-stop expected returns (estimated from delivered returnable volume × return rate), envase outbound zone.
-- **Output**: a stop-by-stop free-space timeline. For each stop *k*, report: free volume available, returns picked up, fits/overflows.
+- **Input**: `LoadPlan` (FR-006), per-stop expected returns (estimated from delivered returnable units × per-class return rate), envase outbound zone.
+- **Return rates per SKU class** (locked 2026-05-09):
+  - **BRL** (barrels, kegs): 100% — every delivered barrel is collected back empty on the same stop or on a subsequent visit.
+  - **RET** (returnable bottles / cases marked `RET` in description): 80%.
+  - **SR** (sin retorno, one-way): 0%.
+  - **Other / unknown**: 60% (the brief's global average).
+- **Output**: a stop-by-stop free-space timeline. For each stop *k*, report: free units / weight available, returns picked up, fits/overflows.
 - **Acceptance**: For the demo carga, the free-space curve is non-negative at every stop. If not, the optimiser is signalled to re-order (FR-005 loop).
 - **Owner**: backend dev B.
 - **Depends on**: FR-006.
@@ -518,11 +538,11 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 
 ### FR-009 — KPI engine
 - **Compares**: `BaselinePlan` (FR-004) vs. `Plan` (FR-008).
-- **Metrics**:
+- **Metrics** (locked 2026-05-09 — volume KPI dropped because the printed Hoja Carga unit is ambiguous; weight + count are unambiguous and sufficient):
   - `total_km` — from distance matrix along the chosen sequence.
   - `total_minutes` — travel + service.
-  - `unload_minutes_estimated` — service-time-per-stop is a function of (number of distinct in-truck zones the driver has to visit for that stop). Smart plan should reduce this.
-  - `in_truck_searches` — count of (stop, ubicación) pairs distinct per stop, summed.
+  - `unload_minutes_estimated` — `10 + 2 * distinct_in_truck_zones_per_stop`, summed across stops. Smart plan should reduce this because each customer's items are clustered in fewer zones.
+  - `in_truck_searches` — count of distinct `Ubicación`-equivalent zones touched per stop, summed.
   - `space_utilisation_pct` — sum of pallet-equivalents / truck capacity.
 - **Output**: deltas (signed) per metric.
 - **Acceptance**: at least 3 of 5 metrics show improvement on demo carga (verification target).
@@ -530,12 +550,12 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 
 ### FR-010 — Smart Hoja Carga emitter
 - **Input**: `Plan` (FR-008) + parsed source `HojaCarga` (FR-004).
-- **Output**: a PDF that reproduces the DDIDGP layout exactly (header, four sections, totals) with the `Descarga` column populated for every line. Optionally colour-codes rows by destination customer cluster.
+- **Output**: a PDF that reproduces the DDIDGP layout (header, four sections, totals) with the `Descarga` column populated for every line. Optionally colour-codes rows by destination customer cluster.
 - **Acceptance**:
   - Visual diff against the source PDF: only the `Descarga` column has new content.
   - Same total counts in section footers.
   - Renders in <5 s for ≤ 100 lines.
-- **Tech**: WeasyPrint (HTML/CSS to PDF) — easier than ReportLab for table-heavy layouts.
+- **Tech** (locked 2026-05-09): **ReportLab** (pure Python, no system-library dependencies). Use `Platypus` `Table` flowables; mimic the DDIDGP fonts and column widths from the source PDF.
 - **Owner**: backend dev B.
 
 ### FR-011 — Smart Hoja Ruta emitter
@@ -544,6 +564,7 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Acceptance**:
   - All original albarán IDs present, no duplicates.
   - Row order matches `Plan.sequence`.
+- **Tech** (locked 2026-05-09): **ReportLab**, same toolchain as FR-010.
 - **Owner**: backend dev B.
 
 ### FR-012 — REST API
@@ -563,7 +584,9 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Depends on**: FR-012.
 
 ### FR-014 — Map view (`MapView.tsx`)
-- **Tech**: Mapbox GL JS (preferred if FR-002 has a key) else Leaflet + OSM tiles.
+- **Tech** (locked 2026-05-09): **Leaflet** (or `react-leaflet`) with **CartoDB Positron** tiles — no API key, clean light style.
+  - Tile URL: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png`
+  - Attribution: `© OpenStreetMap contributors © CARTO`
 - **Renders**: depot marker (Mollet), stop markers numbered in optimised order, polyline animated on play.
 - **Acceptance**: 18 stops render in <500 ms; pan/zoom smooth.
 
@@ -591,11 +614,11 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 - **Renders** the `Explanation` records emitted by FR-008.
 - **Format**: "{stop_name} placed at {pallet} because: stop {k}/{N}; {time_window_reason}; {pairing_reason}; {LIFO_reason}".
 
-### FR-019 — Live deployment
-- **Backend**: container on Render/Fly.io; HTTPS.
-- **Frontend**: Vercel; HTTPS; env var pointing to backend URL.
-- **Domain**: `smart-truck.<event-domain>` (depends on MQ-T-01).
-- **Acceptance**: judges can hit the URL from any device during the pitch.
+### FR-019 — Local demo (was: live deployment)
+- Decision 2026-05-09: **demo runs on localhost** for v1. Pitch runs from the team's laptop on the projector.
+- **Backend**: `uvicorn smart_truck.api:app --port 8000`.
+- **Frontend**: `npm run dev` (Next.js dev server on `:3000`).
+- **Acceptance**: end-to-end demo (open the dashboard, hit the API, render the map and truck twin, download Smart Hoja Carga PDF) runs cleanly on a freshly-cloned machine after `setup.sh`.
 
 ---
 
@@ -607,25 +630,37 @@ End state of the data layer: we materialise these as parquet files in `backend/d
 | NFR-002 | All UI in Spanish or Catalan strings (judges + DAMM ops are Spanish/Catalan-speaking). Code comments in English. |
 | NFR-003 | No secrets in repo. API keys in `.env` and platform env vars only. |
 | NFR-004 | The repo runs cold on a clean machine with `pip install -r requirements.txt && python -m smart_truck.data.load && uvicorn smart_truck.api:app` and `cd frontend && npm i && npm run dev`. |
-| NFR-005 | Smart Hoja Carga PDF is visually within 5% of the original DDIDGP layout (font sizes, column widths, header block). |
+| NFR-005 | Smart Hoja Carga PDF is visually within 5% of the original DDIDGP layout (font sizes, column widths, header block). Rendered via ReportLab `Platypus` tables. |
 | NFR-006 | Frontend works on Chrome, Safari, Firefox latest. |
 
 ---
 
-## 5. Open assumptions (to validate with mentors)
+## 5. Locked decisions and remaining assumptions
 
-| ID | Assumption | Risk if wrong |
+Most of the table below was resolved in the user-led decision session on 2026-05-09. Items still requiring DAMM-mentor confirmation are flagged.
+
+| ID | Status | Decision / assumption |
 |---|---|---|
-| A-01 | A 6-pallet truck is a 2×3 grid; 8-pallet is 2×4. EUR pallets 80×120 cm. | Load packer geometry. |
-| A-02 | Side-curtain trucks allow access to any pallet from either lateral side. | Reachability constraint. |
-| A-03 | ~~Resolved 2026-05-09~~: route codes in `Detalle entrega` are standard `DR…`, joinable directly with `ZONAS.RutReal` and Hoja Carga. The single `DA…` legacy route is filtered out during ETL. |
-| A-04 | Stop order on the source Hoja Ruta IS the actual delivery order Fran took on 2026-05-08. | Baseline KPI honesty. |
-| A-05 | Customers without a `Horarios Entrega` row are open during normal HoReCa hours (08:00–14:00 + 17:00–22:00). | TW feasibility. |
-| A-06 | Service time per stop = 10 min base + 2 min per distinct in-truck `Ubicación` touched. | KPI delta size. |
-| A-07 | Average return rate = 60% of *returnable-class* SKUs (RET / BRL); 0% of one-way SKUs (SR). | Returns volume. |
-| A-08 | Mollet depot lat/lon: 41.5444, 2.2143 (approximate from address). | Distance accuracy. |
-| A-09 | The carga `11764336` referenced on the example Albarán is a **different carga** from `11764300` on the example Hoja Carga / Hoja Ruta. We use only `11764300` for the demo. | Avoids confusing cross-references. |
-| A-10 | "icired" branding on the Albarán is the e-invoicing platform; not relevant to our build. | None. |
+| A-01 | ✅ Locked 2026-05-09 | **Truck grids**: furgoneta 1×3, 6-pallet truck 2×3, 8-pallet truck 2×4. EUR 80×120 cm pallets. **Vertical stack ≤ 1.80 m** per slot. Barrels (BRL30/BRL20/TB8) occupy one slot each and stack vertically up to the 1.80 m limit. |
+| A-02 | ⚠️ To confirm with mentor | Side-curtain trucks allow access to any pallet from either lateral side. |
+| A-03 | ✅ Resolved 2026-05-09 | Route codes in `Detalle entrega` are standard `DR…`, joinable directly with `ZONAS.RutReal` and Hoja Carga. The single `DA…` legacy route is filtered out during ETL. |
+| A-04 | ⚠️ To confirm with mentor | Stop order on the source Hoja Ruta IS the actual delivery order Fran took on 2026-05-08. (Decision 2026-05-09: trust it for v1; revisit if mentor disagrees.) |
+| A-05 | ✅ Resolved 2026-05-09 | `Horarios Entrega` is **complete** — every customer × weekday is explicit. `K = L = 00:00:00` means closed that day. No "default window" needed. |
+| A-06 | ✅ Locked 2026-05-09 | Service time per stop = `10 + 2 × distinct_in_truck_zones_touched` minutes. Drives the unload-time KPI delta. |
+| A-07 | ✅ Locked 2026-05-09 | Per-class return rates: BRL = 100%, RET = 80%, SR = 0%, other = 60%. |
+| A-08 | ⚠️ Geocode at ETL | Mollet depot lat/lon will be geocoded via Nominatim from the address `C/Molí de Can Bassa, Nau Damm 1, 08100 Mollet del Vallès`. Sanity-check the result. |
+| A-09 | ✅ Logged | The carga `11764336` referenced on the example Albarán is a **different carga** from `11764300` on the example Hoja Carga / Hoja Ruta. We use only `11764300` for the demo. |
+| A-10 | ✅ Logged | "icired" branding on the Albarán is the e-invoicing platform; not relevant to our build. |
+| A-11 | ✅ Locked 2026-05-09 | **Volume KPI is dropped**. We display weight + count only because the printed Hoja Carga's `Total Volumen` unit is ambiguous. |
+| A-12 | ✅ Locked 2026-05-09 | **Driver familiarity bias**: soft penalty on deviating from the as-is order, with a UI toggle exposing "familiar" vs "optimal" mode. |
+| A-13 | ✅ Locked 2026-05-09 | **Warehouse `Ubicación` codes are treated as opaque**. Pick-list ordering is plain lex sort; no aisle parsing. |
+| A-14 | ✅ Locked 2026-05-09 | **Hoja Ruta `SSTT` column** is ignored (always `NO` in our sample). |
+| A-15 | ✅ Locked 2026-05-09 | **CONTADO** is surfaced in the driver UI as a flag, but does not affect routing in v1. |
+| A-16 | ✅ Locked 2026-05-09 | **Geocoder = Nominatim**, no key, 1 req/sec, cached to `backend/data/geo_cache.json`. |
+| A-17 | ✅ Locked 2026-05-09 | **Map tiles = CartoDB Positron** via Leaflet, no key. |
+| A-18 | ✅ Locked 2026-05-09 | **PDF rendering = ReportLab** (pure Python). |
+| A-19 | ✅ Locked 2026-05-09 | **Persistence = parquet files committed to the repo**. ETL runs on demand to regenerate. |
+| A-20 | ✅ Locked 2026-05-09 | **Demo runs on localhost** (no live URL for v1). |
 
 ---
 
