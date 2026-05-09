@@ -4,16 +4,9 @@ import { useEffect, useState } from 'react';
 import { MOCK_PLAN, CLUSTER_COLORS } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
 import type { Plan } from '@/lib/types';
+import { formatEta } from '@/lib/time';
 
 const RUN_ID = 'DR0027-2026-05-08';
-
-function formatEta(eta: string): string {
-  if (/^\d{2}:\d{2}/.test(eta)) return eta.slice(0, 5);
-  const d = new Date(eta);
-  return isNaN(d.getTime())
-    ? eta
-    : d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-}
 
 export default function DriverPage() {
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);

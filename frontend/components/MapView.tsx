@@ -3,16 +3,31 @@
 import { useEffect, useState } from 'react';
 import type { StopPlan } from '@/lib/types';
 import { CLUSTER_COLORS, DEPOT } from '@/lib/mocks';
+import { formatEta } from '@/lib/time';
+import { getRouteGeometry } from '@/lib/api';
 
 interface Props {
   stops: StopPlan[];
   selectedSeq: number | null;
   onSelect: (seq: number) => void;
+  runId?: string;
 }
 
-export default function MapView({ stops, selectedSeq, onSelect }: Props) {
+export default function MapView({ stops, selectedSeq, onSelect, runId }: Props) {
   const [mounted, setMounted] = useState(false);
   const [Components, setComponents] = useState<any>(null);
+  const [routeGeom, setRouteGeom] = useState<Array<[number, number]> | null>(null);
+
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    getRouteGeometry(runId)
+      .then((coords) => !cancelled && setRouteGeom(coords))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,8 +76,8 @@ export default function MapView({ stops, selectedSeq, onSelect }: Props) {
 
   const { MapContainer, TileLayer, Marker, Popup, Polyline, numberedIcon, depotIcon } = Components;
 
-  // Build polyline depot → stop1 → … → stopN → depot
-  const polyline: [number, number][] = [
+  // Road-following polyline from OSRM if available; straight-line fallback.
+  const polyline: [number, number][] = routeGeom ?? [
     [DEPOT.lat, DEPOT.lon],
     ...stops
       .filter((s) => s.lat != null && s.lon != null)
@@ -117,11 +132,7 @@ export default function MapView({ stops, selectedSeq, onSelect }: Props) {
               {s.eta && (
                 <>
                   <br />
-                  ETA:{' '}
-                  {new Date(s.eta).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  ETA: {formatEta(s.eta)}
                 </>
               )}
             </Popup>

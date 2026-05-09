@@ -75,6 +75,7 @@ export default function Dashboard() {
           stops={plan.stops}
           selectedSeq={selectedSeq}
           onSelect={setSelectedSeq}
+          runId={apiOk === 'ok' ? RUN_ID : undefined}
         />
       </section>
 

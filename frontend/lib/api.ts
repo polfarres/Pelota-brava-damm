@@ -68,6 +68,15 @@ export async function postPlan(ruta: string, fecha: string): Promise<Plan> {
   return adaptPlan(raw.plan, raw.kpi);
 }
 
+export async function getRouteGeometry(
+  runId: string,
+): Promise<Array<[number, number]>> {
+  const r = await safeFetch<{ coords: Array<[number, number]> }>(
+    `/plan/${encodeURIComponent(runId)}/route-geometry`,
+  );
+  return r.coords;
+}
+
 export function hojaCargaPdfUrl(runId: string): string {
   return `${API_URL}/plan/${runId}/hoja-carga.pdf`;
 }

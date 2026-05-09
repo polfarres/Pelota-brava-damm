@@ -2,15 +2,7 @@
 
 import type { StopPlan } from '@/lib/types';
 import { CLUSTER_COLORS } from '@/lib/mocks';
-
-function formatEta(eta: string): string {
-  // Backend serialises `time` as "HH:MM:SS"; an ISO datetime also works.
-  if (/^\d{2}:\d{2}/.test(eta)) return eta.slice(0, 5);
-  const d = new Date(eta);
-  return isNaN(d.getTime())
-    ? eta
-    : d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-}
+import { formatEta } from '@/lib/time';
 
 interface Props {
   stops: StopPlan[];

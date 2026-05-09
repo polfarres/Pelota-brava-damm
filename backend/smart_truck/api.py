@@ -82,11 +82,11 @@ def _get_or_compute_plan(ruta: str, fecha_iso: str, *, force: bool = False):
                 ),
             )
         plan_obj = pipeline.plan(
-            ruta, date.fromisoformat(fecha_iso), prefer_osrm=False
+            ruta, date.fromisoformat(fecha_iso), prefer_osrm=True
         )
         carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
         baseline = reconstruct_baseline(carga_pdf, ruta_pdf)
-        kpis = compute_kpis(baseline, plan_obj, prefer_osrm=False)
+        kpis = compute_kpis(baseline, plan_obj, prefer_osrm=True)
         _PLAN_CACHE[key] = (plan_obj, kpis)
     return _PLAN_CACHE[key]
 
@@ -231,6 +231,66 @@ def _emit_via_tempfile(emitter, source, plan) -> bytes:
         return out_path.read_bytes()
     finally:
         out_path.unlink(missing_ok=True)
+
+
+_ROUTE_GEOM_CACHE: dict[str, list[tuple[float, float]]] = {}
+
+
+@app.get("/plan/{run_id}/route-geometry")
+def get_route_geometry(run_id: str) -> dict[str, Any]:
+    """Road-following polyline for the optimised route (depot → stops → depot).
+
+    Uses OSRM ``/route`` to fetch the actual driving geometry so the map
+    polyline traces real roads instead of straight lines. Cached for the
+    process lifetime. Falls back to straight-line ``[lat, lon]`` segments
+    if OSRM is unreachable.
+    """
+    if run_id in _ROUTE_GEOM_CACHE:
+        return {"coords": _ROUTE_GEOM_CACHE[run_id]}
+
+    ruta, fecha = _parse_run_id(run_id)
+    plan_obj, _ = _get_or_compute_plan(ruta, fecha)
+
+    from .kpi import MOLLET_DEPOT
+
+    waypoints: list[tuple[float, float]] = [MOLLET_DEPOT]
+    for s in plan_obj.stops:
+        if s.lat is not None and s.lon is not None:
+            waypoints.append((s.lat, s.lon))
+    waypoints.append(MOLLET_DEPOT)
+
+    coords = _fetch_osrm_route_geometry(waypoints)
+    _ROUTE_GEOM_CACHE[run_id] = coords
+    return {"coords": coords}
+
+
+def _fetch_osrm_route_geometry(
+    waypoints: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Call OSRM ``/route`` and return ``[(lat, lon), …]``. Falls back to
+    the input waypoints (straight-line) on any failure."""
+    if len(waypoints) < 2:
+        return waypoints
+    try:
+        import requests
+
+        coord_str = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in waypoints)
+        url = f"https://router.project-osrm.org/route/v1/driving/{coord_str}"
+        r = requests.get(
+            url,
+            params={"overview": "full", "geometries": "geojson"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        body = r.json()
+        if body.get("code") != "Ok" or not body.get("routes"):
+            raise RuntimeError(f"OSRM /route code={body.get('code')!r}")
+        # GeoJSON coords are [lon, lat]; flip to (lat, lon).
+        geom = body["routes"][0]["geometry"]["coordinates"]
+        return [(lat, lon) for lon, lat in geom]
+    except Exception as e:  # noqa: BLE001
+        print(f"  OSRM /route unavailable ({type(e).__name__}: {e}); straight-line")
+        return waypoints
 
 
 @app.get("/plan/{run_id}/hoja-carga.pdf")
