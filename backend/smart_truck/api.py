@@ -70,35 +70,22 @@ def _parse_run_id(run_id: str) -> tuple[str, str]:
 
 
 def _get_or_compute_plan(ruta: str, fecha_iso: str, *, force: bool = False):
-    """Return the cached Plan + KpiSummary, computing on first miss.
-
-    For routes with source PDFs (today only ``DR0027-2026-05-08``) the
-    KPIs are computed against the as-is paperwork reconstruction.
-    For arbitrary routes from the deliveries dataset, the baseline is
-    a *forced-natural-order* run of the same pipeline (familiarity
-    weight cranked up), which gives a fair "before optimisation"
-    comparison without needing PDFs.
-    """
+    """Return the cached Plan + KpiSummary, computing on first miss."""
     key = f"{ruta}-{fecha_iso}"
     if force or key not in _PLAN_CACHE:
-        try:
-            plan_obj = pipeline.plan(
-                ruta, date.fromisoformat(fecha_iso), prefer_osrm=True
+        if key not in _KNOWN_CARGAS:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"unknown run_id {key!r}. Today only "
+                    f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
+                ),
             )
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e)) from e
-
-        if key in _KNOWN_CARGAS:
-            carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
-            baseline = reconstruct_baseline(carga_pdf, ruta_pdf)
-        else:
-            baseline = pipeline.plan(
-                ruta,
-                date.fromisoformat(fecha_iso),
-                vehicle_profile=plan_obj.vehicle_profile,
-                familiarity_weight=1e6,  # lock to the data's natural order
-                prefer_osrm=True,
-            )
+        plan_obj = pipeline.plan(
+            ruta, date.fromisoformat(fecha_iso), prefer_osrm=True
+        )
+        carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
+        baseline = reconstruct_baseline(carga_pdf, ruta_pdf)
         kpis = compute_kpis(baseline, plan_obj, prefer_osrm=True)
         _PLAN_CACHE[key] = (plan_obj, kpis)
     return _PLAN_CACHE[key]
@@ -150,91 +137,28 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/routes")
-def list_routes() -> dict[str, Any]:
-    """List every ``(ruta, fecha_iso)`` combination present in the
-    deliveries dataset, plus a customer count per pair. Frontend uses
-    this to populate a route + date picker.
-
-    The fecha is normalised to ISO ``YYYY-MM-DD`` so the picker can
-    pass it straight to ``GET /plan/{ruta}-{fecha}``.
-    """
-    import pandas as pd
-
-    PROCESSED = Path(__file__).resolve().parents[1] / "data" / "processed"
-    deliv = pd.read_parquet(PROCESSED / "deliveries.parquet")
-
-    def _to_iso(d: str) -> str:
-        # deliveries.parquet stores dates as dd/mm/yyyy strings.
-        try:
-            day, month, year = d.split("/")
-            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-        except ValueError:
-            return d
-
-    grouped = (
-        deliv.groupby(["route", "date"])["customer_id"]
-        .nunique()
-        .reset_index()
-        .rename(columns={"customer_id": "n_customers"})
-    )
-    grouped["fecha"] = grouped["date"].map(_to_iso)
-    grouped = grouped.sort_values(["route", "fecha"])
-
-    # The existing demo carga (DR0027 / 2026-05-08) is always offered
-    # even though it isn't in the deliveries parquet — it's the only
-    # carga with full source PDFs.
-    items = [
-        {
-            "ruta": str(r["route"]),
-            "fecha": str(r["fecha"]),
-            "n_customers": int(r["n_customers"]),
-            "run_id": f"{r['route']}-{r['fecha']}",
-        }
-        for _, r in grouped.iterrows()
-    ]
-    demo_key = "DR0027-2026-05-08"
-    if not any(it["run_id"] == demo_key for it in items):
-        items.insert(0, {
-            "ruta": "DR0027",
-            "fecha": "2026-05-08",
-            "n_customers": 15,
-            "run_id": demo_key,
-        })
-    return {"routes": items}
-
-
 @app.get("/baseline")
 def get_baseline(ruta: str, fecha: str) -> dict[str, Any]:
     """As-is reconstruction (FR-004) for a given ``(ruta, fecha)``.
 
-    For ``DR0027 / 2026-05-08`` we have real source PDFs and parse them
-    directly. For arbitrary ``(ruta, fecha)`` from the deliveries
-    dataset we emit a *synthetic baseline*: the same v2 pipeline with
-    a very high familiarity weight, which forces the route order to
-    match the data's natural sequence (i.e. what the driver would do
-    without our optimiser).
+    Today only ``DR0027 / 2026-05-08`` is wired — that's the only carga
+    we have source PDFs for. Future versions will discover PDFs by ruta
+    and fecha automatically.
     """
-    key = f"{ruta}-{fecha}"
-    if key in _KNOWN_CARGAS:
-        carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
-        return _jsonable(reconstruct_baseline(carga_pdf, ruta_pdf))
-
-    # Cache the synthetic baseline by run_id so we don't re-run the
-    # pipeline every time the pick-list page mounts.
-    cache_key = f"baseline::{key}"
-    if cache_key not in _PLAN_CACHE:
-        try:
-            baseline_plan = pipeline.plan(
-                ruta,
-                date.fromisoformat(fecha),
-                familiarity_weight=1e6,
-                prefer_osrm=True,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e)) from e
-        _PLAN_CACHE[cache_key] = (baseline_plan, None)
-    return _jsonable(_PLAN_CACHE[cache_key][0])
+    if (ruta, fecha) != ("DR0027", "2026-05-08"):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Only DR0027 / 2026-05-08 has source PDFs for now. "
+                "Add a Hoja Carga + Hoja Ruta PDF pair under "
+                "Hackaton/DAMM/RECURSOS/ to extend coverage."
+            ),
+        )
+    bp = reconstruct_baseline(
+        RECURSOS_DIR / "Hoja Carga.pdf",
+        RECURSOS_DIR / "Hoja Ruta.pdf",
+    )
+    return _jsonable(bp)
 
 
 @app.get("/customers/{customer_id}")

@@ -4,30 +4,30 @@ import { useEffect, useState } from 'react';
 import PickListTable from '@/components/PickListTable';
 import { MOCK_BASELINE, MOCK_PLAN } from '@/lib/mocks';
 import { getBaseline, getPlan, hojaCargaPdfUrl } from '@/lib/api';
-import { splitRunId, useRunId } from '@/lib/runId';
 import type { BaselinePlan, Plan } from '@/lib/types';
 
+const RUN_ID = 'DR0027-2026-05-08';
+
 export default function PickListPage() {
-  const runId = useRunId();
-  const [ruta, fecha] = splitRunId(runId);
   const [mode, setMode] = useState<'original' | 'smart'>('smart');
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
   const [baseline, setBaseline] = useState<BaselinePlan>(MOCK_BASELINE);
 
   useEffect(() => {
     let cancelled = false;
-    getBaseline(ruta, fecha)
+    getBaseline('DR0027', '2026-05-08')
       .then((b) => !cancelled && setBaseline(b))
       .catch(() => {});
-    getPlan(runId)
+    getPlan(RUN_ID)
       .then((p) => !cancelled && setPlan(p))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [runId, ruta, fecha]);
+  }, []);
 
   const data = mode === 'smart' ? plan : baseline;
+  const runId = `${plan.ruta}-${plan.fecha}`;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

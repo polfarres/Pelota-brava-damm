@@ -4,21 +4,21 @@ import { useEffect, useState } from 'react';
 import TruckTwin3D from '@/components/TruckTwin3D';
 import { MOCK_PLAN, CLUSTER_COLORS } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
-import { useRunId } from '@/lib/runId';
 import type { Plan } from '@/lib/types';
 
+const RUN_ID = 'DR0027-2026-05-08';
+
 export default function TruckPage() {
-  const runId = useRunId();
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
   useEffect(() => {
     let cancelled = false;
-    getPlan(runId)
+    getPlan(RUN_ID)
       .then((p) => !cancelled && setPlan(p))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, []);
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-2xl font-bold mb-2">Truck Twin · DR0027</h1>

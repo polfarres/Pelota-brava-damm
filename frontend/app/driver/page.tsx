@@ -3,22 +3,22 @@
 import { useEffect, useState } from 'react';
 import { MOCK_PLAN, CLUSTER_COLORS } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
-import { useRunId } from '@/lib/runId';
 import type { Plan } from '@/lib/types';
 import { formatEta } from '@/lib/time';
 
+const RUN_ID = 'DR0027-2026-05-08';
+
 export default function DriverPage() {
-  const runId = useRunId();
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
   useEffect(() => {
     let cancelled = false;
-    getPlan(runId)
+    getPlan(RUN_ID)
       .then((p) => !cancelled && setPlan(p))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, []);
   // First stop of the optimised plan.
   const stop = plan.stops[0] ?? MOCK_PLAN.stops[0];
   const colour = CLUSTER_COLORS[stop.customer_id] ?? '#7e57c2';
