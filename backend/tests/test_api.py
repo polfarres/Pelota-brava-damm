@@ -73,6 +73,13 @@ def test_post_plan_stub_returns_501(client: TestClient) -> None:
     assert r.status_code == 501
 
 
+def test_get_plan_stub_returns_501(client: TestClient) -> None:
+    r = client.get("/plan/DR0027-2026-05-08")
+    assert r.status_code == 501
+    body = r.json()
+    assert "Track A" in body["detail"]
+
+
 def test_smart_carga_pdf_unknown_run_id_404(client: TestClient) -> None:
     r = client.get("/plan/abc/hoja-carga.pdf")
     assert r.status_code == 404

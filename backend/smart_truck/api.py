@@ -158,6 +158,30 @@ def post_plan(_req: PlanRequest) -> dict[str, Any]:
     )
 
 
+@app.get("/plan/{run_id}")
+def get_plan(run_id: str) -> dict[str, Any]:
+    """Fetch a previously-computed :class:`Plan` as JSON.
+
+    Response shape mirrors :class:`smart_truck.models.Plan`: ``ruta``,
+    ``fecha``, ``vehicle_profile``, ``stops`` (each a ``StopPlan``),
+    ``slot_assignments`` (each a ``SlotAssignment``), and
+    ``explanations``.
+
+    Stub today: 501 until Track A wires the optimiser + Plan store.
+    Track C can mock against ``smart_truck.models.Plan``; the real
+    endpoint will route through whatever Plan store Track A
+    introduces under ``run_id`` keys of the form ``{ruta}-{fecha}``
+    (same convention as the PDF endpoints).
+    """
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            f"Plan {run_id!r} not yet retrievable. Track A: register "
+            "the Plan store and route this endpoint to it."
+        ),
+    )
+
+
 def _emit_via_tempfile(emitter, source, plan) -> bytes:
     """Run a paperwork emitter into a temp file and return its bytes."""
     with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
