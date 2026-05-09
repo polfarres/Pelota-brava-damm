@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Sequence
 
 from smart_truck.domain.vehicle import Slot, VehicleProfile
@@ -67,6 +67,21 @@ MILP_SOLVE_TIME_S = 10  # cap solver wall-time, fall back to heuristic
 # "Barril", "Tubo" → BARREL
 CASE_UNITS = frozenset({"Caja", "Pack", "Botella", "Unidad", "Lat"})
 BARREL_UNITS = frozenset({"Barril", "Tubo"})
+
+# Tier-1 staple SKUs: the "Estrella 1/3 cycle" — the full bottle going
+# out and the empty crate coming back. Cross-route analysis of the
+# Mar 2026 deliveries dataset shows these two SKUs alone hit 60-72%
+# of stops on every analysed route every analysed day. Reserving a
+# dedicated column lets the picker bring them as one warehouse wave
+# and the driver pluck cases without rotating the rest of the pallet.
+# (Discussed with team 2026-05-10; see /backend tools/staples_analysis.)
+STAPLE_TIER1_SKUS = frozenset({"CJ13", "ED13"})
+
+# Slots whose post-MILP ``ce_used`` falls below this threshold get
+# fused into another partial of the same type during the warehouse-
+# load-time rebalance. Once the truck leaves Mollet the layout is
+# frozen — A-35 returns flow back into the same physical positions.
+PARTIAL_PALLET_THRESHOLD_CE = 30.0
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +686,168 @@ def _estimate_driver_minutes(
 
 
 # ---------------------------------------------------------------------------
+# Phase 0 — Staple extraction (Tier-1 SKUs reserve a dedicated column)
+# ---------------------------------------------------------------------------
+
+
+def _split_staples_from_stops(
+    stops: Sequence[StopDemand],
+) -> tuple[list[StopDemand], dict[int, tuple[int, list[DeliveredLine]]]]:
+    """Pull Tier-1 staples out of each stop's lines.
+
+    Returns ``(residual_stops, staples_per_stop)``:
+    - ``residual_stops``: same stops, lines filtered to drop staples.
+    - ``staples_per_stop``: ``stop_seq → (customer_id, staple_lines)``
+      for stops that had staple SKUs (else not present).
+    """
+    residual: list[StopDemand] = []
+    staples: dict[int, tuple[int, list[DeliveredLine]]] = {}
+    for s in stops:
+        keep: list[DeliveredLine] = []
+        take: list[DeliveredLine] = []
+        for ln in s.lines:
+            (take if ln.sku in STAPLE_TIER1_SKUS else keep).append(ln)
+        residual.append(StopDemand(sequence=s.sequence, customer_id=s.customer_id, lines=keep))
+        if take:
+            staples[s.sequence] = (s.customer_id, take)
+    return residual, staples
+
+
+def _build_staple_pallet(
+    profile: VehicleProfile,
+    staples_per_stop: dict[int, tuple[int, list[DeliveredLine]]],
+    excluded_slot_ids: set[str],
+) -> SlotAssignment | None:
+    """Build the dedicated staple SlotAssignment.
+
+    Picks the first CASE-compatible slot in the vehicle's curtain-
+    accessible order that isn't already in ``excluded_slot_ids``, then
+    stacks the staple lines per stop in delivery sequence order
+    (top = first delivered, A-38 invariant).
+
+    Returns ``None`` if there are no staple lines, the total CE exceeds
+    one pallet (caller falls back to vanilla packing), or no eligible
+    slot is available.
+    """
+    if not staples_per_stop:
+        return None
+
+    total_ce = sum(
+        sum(l.ce * l.quantity for l in lines)
+        for _, lines in staples_per_stop.values()
+    )
+    if total_ce <= 0 or total_ce > CE_PER_PALLET + 1e-6:
+        return None
+
+    candidate: Slot | None = None
+    for slot in _slot_order(profile):
+        if slot.id in excluded_slot_ids:
+            continue
+        if not _slot_accepts(slot, "CASE"):
+            continue
+        candidate = slot
+        break
+    if candidate is None:
+        return None
+
+    seqs = sorted(staples_per_stop.keys())
+    stack: list[StackEntry] = []
+    contents: list[DeliveredLine] = []
+    ce_used = 0.0
+    for seq in seqs:
+        cid, lines = staples_per_stop[seq]
+        layer_ce = sum(l.ce * l.quantity for l in lines)
+        stack.append(StackEntry(
+            stop_sequence=seq,
+            customer_id=cid,
+            ce=layer_ce,
+            lines=list(lines),
+        ))
+        contents.extend(lines)
+        ce_used += layer_ce
+
+    return SlotAssignment(
+        slot_id=candidate.id,
+        is_envase_zone=False,
+        pallet_type="CASE",
+        stack=stack,
+        stop_sequences=seqs,
+        contents=contents,
+        ce_used=ce_used,
+        ce_capacity=candidate.capacity_ce,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.5 — Warehouse-load-time rebalance of partial pallets
+# ---------------------------------------------------------------------------
+
+
+def _rebalance_partial_pallets(
+    slots: list[SlotAssignment],
+    threshold_ce: float = PARTIAL_PALLET_THRESHOLD_CE,
+) -> list[SlotAssignment]:
+    """Fuse near-empty pallets into others of the same type.
+
+    Runs ONCE at warehouse load time. Once the truck is out, the layout
+    is frozen (A-35 returns flow into freed top-of-stack space at the
+    same physical position).
+
+    Repeats until no partial pallet (``ce_used < threshold_ce``) can be
+    merged into another non-empty pallet of matching type without
+    breaking the 60-CE cap.
+    """
+    while True:
+        merged_this_pass = False
+        # Snapshot the partials list each pass since slots mutate.
+        partials = [sa for sa in slots if sa.stack and sa.ce_used < threshold_ce]
+        if len(partials) < 2 and not any(
+            sa.stack and sa.ce_used < threshold_ce for sa in slots
+        ):
+            return slots
+
+        for src in partials:
+            if not src.stack:
+                continue
+            best_dst: SlotAssignment | None = None
+            best_headroom = -1.0
+            for dst in slots:
+                if dst is src or not dst.stack:
+                    continue
+                if dst.pallet_type != src.pallet_type:
+                    continue
+                headroom = dst.ce_capacity - dst.ce_used
+                if src.ce_used > headroom + 1e-6:
+                    continue
+                # Prefer the dst whose existing stops are closest in
+                # sequence to src's — keeps tight LIFO clusters tight.
+                if headroom > best_headroom:
+                    best_headroom = headroom
+                    best_dst = dst
+            if best_dst is None:
+                continue
+            # Merge: append src layers, re-sort by stop_sequence ascending.
+            merged_stack = sorted(
+                best_dst.stack + src.stack,
+                key=lambda e: e.stop_sequence,
+            )
+            best_dst.stack = merged_stack
+            best_dst.contents = [ln for entry in merged_stack for ln in entry.lines]
+            best_dst.stop_sequences = [e.stop_sequence for e in merged_stack]
+            best_dst.ce_used = best_dst.ce_used + src.ce_used
+            # Empty src.
+            src.stack = []
+            src.contents = []
+            src.stop_sequences = []
+            src.ce_used = 0.0
+            merged_this_pass = True
+            break
+
+        if not merged_this_pass:
+            return slots
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -683,6 +860,7 @@ def pack_truck(
     use_milp: bool = True,
     milp_time_limit_s: int = MILP_SOLVE_TIME_S,
     whole_pallet_threshold_ce: float = CE_PER_PALLET,
+    use_staple_column: bool = True,
 ) -> LoadPlan:
     """Pack one truck end-to-end. The route order is the order of ``stops``
     (sequence ascending).
@@ -692,6 +870,12 @@ def pack_truck(
     under the v2 model (A-36): outbound envases ride along with the
     case-pallets they belong to, and there is no whole-pallet/partial
     distinction beyond the CE budget itself.
+
+    When ``use_staple_column`` is true (default) the packer tries to
+    extract :data:`STAPLE_TIER1_SKUS` into a dedicated curtain-side
+    column before running the MILP on the remainder. If extraction
+    isn't feasible (no slot, or staples > 60 CE) the packer falls
+    back to packing everything together.
     """
     _ = envase_lines
     _ = whole_pallet_threshold_ce
@@ -699,10 +883,45 @@ def pack_truck(
     if not profile.slots:
         raise LoadPlanError(f"Vehicle {profile.profile_id} has no slots.")
 
-    type_map, total_case_ce, total_barrel_ce = _budget_and_assign_types(profile, stops)
+    # Phase 0: try the staple-aware path first.
+    staple_slot: SlotAssignment | None = None
+    working_stops: Sequence[StopDemand] = stops
+    if use_staple_column:
+        residual_stops, staples_per_stop = _split_staples_from_stops(stops)
+        if staples_per_stop:
+            # Pre-select the staple slot and verify residual fits in the
+            # remaining slots before committing to the split.
+            ss = _build_staple_pallet(
+                profile,
+                staples_per_stop,
+                excluded_slot_ids=set(),
+            )
+            if ss is not None:
+                try:
+                    _budget_and_assign_types(
+                        _profile_excluding(profile, {ss.slot_id}),
+                        residual_stops,
+                    )
+                except LoadPlanError:
+                    # Residual won't fit if we steal a slot for staples;
+                    # silently fall back to packing everything together.
+                    log.info(
+                        "Staple-aware split skipped: residual demand "
+                        "doesn't fit in profile minus the staple slot."
+                    )
+                else:
+                    # Residual fits — commit to the split.
+                    staple_slot = ss
+                    working_stops = residual_stops
 
-    customers = _split_large_customers(stops, CE_PER_PALLET)
-    if not customers:
+    excluded = {staple_slot.slot_id} if staple_slot else set()
+    working_profile = _profile_excluding(profile, excluded)
+    type_map, total_case_ce, total_barrel_ce = _budget_and_assign_types(
+        working_profile, working_stops
+    )
+
+    customers = _split_large_customers(working_stops, CE_PER_PALLET)
+    if not customers and staple_slot is None:
         return LoadPlan(
             slot_assignments=[],
             pallet_equivalents_used=0.0,
@@ -710,25 +929,36 @@ def pack_truck(
             estimated_driver_minutes=0.0,
         )
 
-    assignment, backend = _assign_customers(
-        customers,
-        type_map,
-        pallet_capacity=CE_PER_PALLET,
-        use_milp=use_milp,
-        milp_time_limit_s=milp_time_limit_s,
-    )
+    if customers:
+        assignment, backend = _assign_customers(
+            customers,
+            type_map,
+            pallet_capacity=CE_PER_PALLET,
+            use_milp=use_milp,
+            milp_time_limit_s=milp_time_limit_s,
+        )
+        slots_out = _build_slot_assignments(customers, assignment, type_map, profile)
+    else:
+        backend = "skipped"
+        slots_out = []
 
-    slots_out = _build_slot_assignments(customers, assignment, type_map, profile)
+    # Phase 6.5: rebalance partial pallets ONCE before the truck leaves.
+    slots_out = _rebalance_partial_pallets(slots_out)
+
+    if staple_slot is not None:
+        slots_out.insert(0, staple_slot)
+
     verify_access(profile, slots_out)
     driver_min = _estimate_driver_minutes(stops, slots_out)
 
     pallets_used = float(sum(1 for sa in slots_out if sa.stack))
     log.info(
-        "pack_truck OK [%s] %s: %d pallets used (%d case + %d barrel), "
+        "pack_truck OK [%s] %s: %d pallets used (%d case + %d barrel%s), "
         "%.0f case-CE + %.0f barrel-CE, ~%.0f min driver time.",
         backend, profile.profile_id, int(pallets_used),
         sum(1 for ptype in type_map.values() if ptype == "CASE"),
         sum(1 for ptype in type_map.values() if ptype == "BARREL"),
+        " + 1 staple column" if staple_slot else "",
         total_case_ce, total_barrel_ce, driver_min,
     )
 
@@ -737,4 +967,23 @@ def pack_truck(
         pallet_equivalents_used=pallets_used,
         total_capacity_ce=profile.total_capacity_ce,
         estimated_driver_minutes=driver_min,
+    )
+
+
+def _profile_excluding(profile: VehicleProfile, exclude: set[str]) -> VehicleProfile:
+    """Return a shallow copy of ``profile`` with the named slots removed.
+
+    Used to hide the reserved staple slot from the budget / MILP / type
+    assignment so the residual demand only competes for the remaining
+    physical positions.
+    """
+    if not exclude:
+        return profile
+    return replace(
+        profile,
+        slots=[s for s in profile.slots if s.id not in exclude],
+        lifo_order_per_face={
+            face: [sid for sid in order if sid not in exclude]
+            for face, order in profile.lifo_order_per_face.items()
+        },
     )
