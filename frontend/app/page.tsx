@@ -48,7 +48,7 @@ export default function Dashboard() {
       <aside className="col-span-3 bg-white rounded-lg border border-gray-200 p-3 overflow-y-auto">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-bold uppercase tracking-wide text-gray-500">
-            Paradas optimizadas
+            Parades optimitzades
           </h2>
           <span
             className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
@@ -59,7 +59,7 @@ export default function Dashboard() {
                   : 'bg-gray-100 text-gray-500'
             }`}
           >
-            {apiOk === 'ok' ? 'API conectada' : apiOk === 'fallback' ? 'Mock data' : 'Cargando…'}
+            {apiOk === 'ok' ? 'API connectada' : apiOk === 'fallback' ? 'Dades de prova' : 'Carregant…'}
           </span>
         </div>
         <StopList

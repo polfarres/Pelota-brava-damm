@@ -33,10 +33,10 @@ export default function PickListPage() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Hoja de Carga · DR0027 · 2026-05-08</h1>
+          <h1 className="text-2xl font-bold">Full de Càrrega · DR0027 · 2026-05-08</h1>
           <p className="text-sm text-gray-600 mt-1">
-            La columna <code className="bg-gray-200 px-1 rounded">Descarga</code> sale en blanco
-            del SAP. Smart Truck la rellena con el slot del camión por línea.
+            La columna <code className="bg-gray-200 px-1 rounded">Descàrrega</code> surt en blanc
+            del SAP. Smart Truck l&apos;omple amb el slot del camió per línia.
           </p>
         </div>
         <a
@@ -45,7 +45,7 @@ export default function PickListPage() {
           rel="noreferrer"
           className="text-sm bg-damm-dark text-white px-3 py-2 rounded hover:bg-damm-red transition-colors"
         >
-          Descargar PDF
+          Descarregar PDF
         </a>
       </div>
 
@@ -76,9 +76,9 @@ export default function PickListPage() {
       <PickListTable plan={data} mode={mode} />
 
       <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm">
-        <strong>Pitch tip:</strong> al alternar entre <em>Original</em> y <em>Smart</em>, la
-        columna Descarga pasa de estar vacía a indicar el pallet (P1…P6) donde cada línea está
-        cargada. Los colores agrupan los productos por cliente.
+        <strong>Idea per al pitch:</strong> en alternar entre <em>Original</em> i <em>Smart</em>, la
+        columna Descàrrega passa d&apos;estar buida a indicar el palet (P1…P6) on cada línia
+        està carregada. Els colors agrupen els productes per client.
       </div>
     </div>
   );

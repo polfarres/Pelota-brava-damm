@@ -59,9 +59,9 @@ export default function TruckTwin3D({ plan }: Props) {
     <div className="bg-white border border-gray-200 rounded-lg p-4">
       <div className="flex justify-between items-center mb-3">
         <div>
-          <h2 className="font-bold text-lg">Truck Twin · {plan.vehicle.license_plate}</h2>
+          <h2 className="font-bold text-lg">Camió · {plan.vehicle.license_plate}</h2>
           <div className="text-xs text-gray-500">
-            {plan.vehicle.profile_name} · {plan.vehicle.capacity_pallets} pallets
+            {plan.vehicle.profile_name} · {plan.vehicle.capacity_pallets} palets
           </div>
         </div>
         <div className="text-right text-sm">
@@ -98,13 +98,13 @@ export default function TruckTwin3D({ plan }: Props) {
         </text>
         {/* Curtain labels */}
         <text x={W / 2} y={20} textAnchor="middle" fontSize={11} fill="#666">
-          ↑ Cortina izquierda ↑
+          ↑ Cortina esquerra ↑
         </text>
         <text x={W / 2} y={H - 5} textAnchor="middle" fontSize={11} fill="#666">
-          ↓ Cortina derecha ↓
+          ↓ Cortina dreta ↓
         </text>
         <text x={W - 15} y={H / 2} textAnchor="middle" fontSize={10} fill="#666" transform={`rotate(90 ${W - 15} ${H / 2})`}>
-          REAR DOOR
+          PORTA POSTERIOR
         </text>
 
         {/* Pallets */}
@@ -161,10 +161,10 @@ export default function TruckTwin3D({ plan }: Props) {
                 opacity={opacity}
               >
                 {state === 'envase'
-                  ? '↺ envases'
+                  ? '↺ envasos'
                   : state === 'delivered'
-                    ? '✓ entregado'
-                    : `stop ${customerSeqs.join(',')}`}
+                    ? '✓ lliurat'
+                    : `parada ${customerSeqs.join(',')}`}
               </text>
             </g>
           );
@@ -181,7 +181,7 @@ export default function TruckTwin3D({ plan }: Props) {
           className="w-full accent-damm-red"
         />
         <div className="flex justify-between text-xs text-gray-500 mt-1">
-          <span>Salida</span>
+          <span>Sortida</span>
           {plan.stops.map((s) => (
             <span key={s.sequence}>{s.sequence}</span>
           ))}
@@ -198,7 +198,7 @@ export default function TruckTwin3D({ plan }: Props) {
           </div>
           {currentStop.pallet_slots && (
             <div className="mt-1 text-xs">
-              Abrir cortina <strong>{currentStop.curtain_side}</strong>, pallet{' '}
+              Obrir cortina <strong>{currentStop.curtain_side}</strong>, palet{' '}
               <strong>{currentStop.pallet_slots.join(', ')}</strong>.
             </div>
           )}

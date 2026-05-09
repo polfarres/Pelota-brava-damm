@@ -86,15 +86,15 @@ export default function PickListTable({ plan, mode }: Props) {
       {/* DDIDGP-style header */}
       <div className="bg-damm-dark text-white px-4 py-2 flex justify-between items-center text-xs">
         <div>
-          <div className="font-bold text-sm">HOJA DE CARGA · DDIDGP</div>
+          <div className="font-bold text-sm">FULL DE CÀRREGA · DDIDGP</div>
           <div>
-            Nº Carga {plan.carga_id ?? '—'} · Vehículo {plan.vehicle.license_plate || '—'} · Repartidor{' '}
+            Núm. Càrrega {plan.carga_id ?? '—'} · Vehicle {plan.vehicle.license_plate || '—'} · Repartidor{' '}
             {plan.driver_id ?? ''} {plan.driver_name ?? ''}
           </div>
         </div>
         <div className="text-right">
           <div>Ruta {plan.ruta}</div>
-          <div>Fecha {plan.fecha}</div>
+          <div>Data {plan.fecha}</div>
           <div className="text-damm-red font-bold mt-1">
             {mode === 'smart' ? 'SMART' : 'ORIGINAL'}
           </div>
@@ -102,13 +102,13 @@ export default function PickListTable({ plan, mode }: Props) {
       </div>
 
       <Section
-        title="Carga lleno"
+        title="Càrrega ple"
         rows={llenoRows}
         total={totalLleno}
         mode={mode}
       />
       <Section
-        title="Carga envases"
+        title="Càrrega envasos"
         rows={envaseRows}
         total={totalEnvases}
         mode={mode}
@@ -134,18 +134,18 @@ function Section({
       <table className="w-full text-xs">
         <thead className="bg-gray-50 border-b border-gray-300">
           <tr className="text-left">
-            <th className="px-3 py-1.5 w-24">Ubicación</th>
-            <th className="px-3 py-1.5 w-20">Nº Prod.</th>
-            <th className="px-3 py-1.5">Descripción</th>
-            <th className="px-3 py-1.5 w-16 text-right">Cantidad</th>
-            <th className="px-3 py-1.5 w-20">Unidad</th>
-            <th className="px-3 py-1.5 w-16">Lote</th>
+            <th className="px-3 py-1.5 w-24">Ubicació</th>
+            <th className="px-3 py-1.5 w-20">Núm. Prod.</th>
+            <th className="px-3 py-1.5">Descripció</th>
+            <th className="px-3 py-1.5 w-16 text-right">Quantitat</th>
+            <th className="px-3 py-1.5 w-20">Unitat</th>
+            <th className="px-3 py-1.5 w-16">Lot</th>
             <th
               className={`px-3 py-1.5 w-24 ${
                 mode === 'smart' ? 'bg-yellow-100 font-extrabold' : ''
               }`}
             >
-              Descarga
+              Descàrrega
             </th>
           </tr>
         </thead>
@@ -173,14 +173,14 @@ function Section({
                       : 'text-gray-300 italic'
                   }`}
                 >
-                  {r.descarga || (mode === 'original' ? '(vacío)' : '')}
+                  {r.descarga || (mode === 'original' ? '(buit)' : '')}
                 </td>
               </tr>
             );
           })}
           <tr className="bg-gray-100 font-semibold">
             <td colSpan={3} className="px-3 py-1.5 text-right">
-              Total Cantidad:
+              Total Quantitat:
             </td>
             <td className="px-3 py-1.5 text-right">{total}</td>
             <td colSpan={3}></td>

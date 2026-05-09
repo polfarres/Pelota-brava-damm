@@ -199,11 +199,11 @@ const SMART_STOPS: StopPlan[] = STOPS_BASE.map((s, i) => {
 function explanationFor(seq: number, slot: string, customer: string): string {
   const total = STOPS_BASE.length;
   const reasons = [
-    `${customer} colocado en ${slot} porque es la parada ${seq}/${total}.`,
-    seq <= 2 ? 'Se entrega temprano por su ventana 08:30–11:00.' : null,
-    seq === 1 ? 'Cortina derecha + slot frontal: acceso LIFO inmediato sin reorganizar.' : null,
-    seq >= 5 ? 'Slot trasero porque la zona de envases queda libre tras las primeras paradas.' : null,
-    'Agrupado con las cajas Estrella 1/3 RET para minimizar búsquedas en bodega.',
+    `${customer} col·locat a ${slot} perquè és la parada ${seq}/${total}.`,
+    seq <= 2 ? "Es lliura aviat per la seva finestra 08:30–11:00." : null,
+    seq === 1 ? 'Cortina dreta + slot frontal: accés LIFO immediat sense reorganitzar.' : null,
+    seq >= 5 ? "Slot posterior perquè la zona d'envasos queda lliure després de les primeres parades." : null,
+    'Agrupat amb les caixes Estrella 1/3 RET per minimitzar cerques al camió.',
   ].filter(Boolean);
   return reasons.join(' ');
 }

@@ -28,14 +28,14 @@ export default function DriverPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <h1 className="text-2xl font-bold mb-1">App Conductor · Mockup</h1>
+      <h1 className="text-2xl font-bold mb-1">App Conductor · Maqueta</h1>
       <p className="text-sm text-gray-600 mb-6">
-        Tres pantallas hardcodeadas con datos reales de la parada #3 de DR0027.
+        Tres pantalles amb dades reals de la primera parada de DR0027.
       </p>
 
       <div className="flex gap-6 flex-wrap justify-center">
         {/* Phone 1: next stop */}
-        <Phone title="Próxima parada">
+        <Phone title="Pròxima parada">
           <div className="px-4 py-3 text-white" style={{ backgroundColor: colour }}>
             <div className="text-xs uppercase opacity-80">Parada {stop.sequence} de {plan.stops.length}</div>
             <div className="text-xl font-bold mt-1">{stop.customer_name}</div>
@@ -49,7 +49,7 @@ export default function DriverPage() {
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500">Ventana</span>
+              <span className="text-gray-500">Finestra</span>
               {stop.time_window_start ? (
                 <span className="font-mono text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
                   ✓ {stop.time_window_start}–{stop.time_window_end}
@@ -62,30 +62,30 @@ export default function DriverPage() {
             </div>
             {stop.payment_condition === 'CONTADO' && (
               <div className="bg-yellow-100 border border-yellow-300 rounded p-2 text-center font-bold text-yellow-900">
-                💰 CONTADO · cobrar {(stop.cash_total ?? stop.proforma_total).toFixed(2)} €
+                💰 COMPTAT · cobrar {(stop.cash_total ?? stop.proforma_total).toFixed(2)} €
               </div>
             )}
             <div className="bg-damm-red text-white rounded-lg p-3 text-center">
-              <div className="text-xs uppercase opacity-80">Acción</div>
+              <div className="text-xs uppercase opacity-80">Acció</div>
               <div className="text-lg font-bold">
-                Abrir cortina <span className="capitalize">{stop.curtain_side ?? '—'}</span>
+                Obrir cortina <span className="capitalize">{stop.curtain_side ?? '—'}</span>
               </div>
               <div className="text-2xl font-bold mt-1">
-                Pallet {stop.pallet_slots?.join(', ') ?? '—'}
+                Palet {stop.pallet_slots?.join(', ') ?? '—'}
               </div>
             </div>
           </div>
         </Phone>
 
         {/* Phone 2: at-stop pickup */}
-        <Phone title="En la parada">
+        <Phone title="A la parada">
           <div className="px-4 py-3 bg-damm-dark text-white">
             <div className="text-xs uppercase opacity-80">{stop.customer_name}</div>
-            <div className="text-base font-bold mt-1">Entregar / Recoger</div>
+            <div className="text-base font-bold mt-1">Lliurar / Recollir</div>
           </div>
           <div className="px-4 py-3 text-sm space-y-3">
             <div>
-              <div className="text-xs uppercase font-bold text-gray-500 mb-1">Entregar</div>
+              <div className="text-xs uppercase font-bold text-gray-500 mb-1">Lliurar</div>
               <ul className="space-y-1">
                 {stop.delivery_lines.map((l, i) => (
                   <li key={i} className="flex justify-between bg-green-50 border-l-2 border-green-500 px-2 py-1">
@@ -96,7 +96,7 @@ export default function DriverPage() {
               </ul>
             </div>
             <div>
-              <div className="text-xs uppercase font-bold text-gray-500 mb-1">Recoger envases</div>
+              <div className="text-xs uppercase font-bold text-gray-500 mb-1">Recollir envasos</div>
               <ul className="space-y-1">
                 {(stop.pickup_envases || []).map((l, i) => (
                   <li key={i} className="flex justify-between bg-blue-50 border-l-2 border-blue-500 px-2 py-1">
@@ -107,39 +107,39 @@ export default function DriverPage() {
               </ul>
             </div>
             <button className="w-full bg-damm-red text-white py-3 rounded font-bold">
-              Confirmar entrega
+              Confirmar lliurament
             </button>
           </div>
         </Phone>
 
         {/* Phone 3: capacity gauge */}
-        <Phone title="Espacio envases">
+        <Phone title="Espai envasos">
           <div className="px-4 py-3 bg-damm-dark text-white">
-            <div className="text-xs uppercase opacity-80">Camión {plan.vehicle.license_plate}</div>
-            <div className="text-base font-bold mt-1">Zona envases · P6</div>
+            <div className="text-xs uppercase opacity-80">Camió {plan.vehicle.license_plate}</div>
+            <div className="text-base font-bold mt-1">Zona envasos · P6</div>
           </div>
           <div className="px-4 py-6 flex flex-col items-center text-sm">
             <Gauge pct={envasesPct} />
             <div className="mt-3 text-center">
               <div className="text-3xl font-bold">{totalEnvasesUsed}</div>
-              <div className="text-xs text-gray-500">de {totalEnvasesCapacity} unidades</div>
+              <div className="text-xs text-gray-500">de {totalEnvasesCapacity} unitats</div>
             </div>
             <div className="mt-4 w-full text-xs space-y-1">
               <div className="flex justify-between">
-                <span>Cajas vacías</span>
-                <span className="font-bold">26 ud</span>
+                <span>Caixes buides</span>
+                <span className="font-bold">26 u</span>
               </div>
               <div className="flex justify-between">
-                <span>Barriles vacíos</span>
-                <span className="font-bold">8 ud</span>
+                <span>Barrils buits</span>
+                <span className="font-bold">8 u</span>
               </div>
               <div className="flex justify-between">
-                <span>Tubos CO₂ vacíos</span>
-                <span className="font-bold">4 ud</span>
+                <span>Tubs CO₂ buits</span>
+                <span className="font-bold">4 u</span>
               </div>
             </div>
             <div className="mt-3 w-full text-xs bg-green-100 border border-green-300 rounded p-2 text-center text-green-700">
-              ✓ Espacio suficiente para próximas {plan.stops.length - stop.sequence} paradas.
+              ✓ Espai suficient per a les pròximes {plan.stops.length - stop.sequence} parades.
             </div>
           </div>
         </Phone>

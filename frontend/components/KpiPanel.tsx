@@ -7,11 +7,11 @@ interface Props {
 }
 
 const METRIC_LABELS: Record<string, { label: string; unit: string; lowerIsBetter: boolean }> = {
-  total_km: { label: 'Distancia total', unit: 'km', lowerIsBetter: true },
-  total_minutes: { label: 'Tiempo total', unit: 'min', lowerIsBetter: true },
-  unload_minutes_estimated: { label: 'Tiempo de descarga', unit: 'min', lowerIsBetter: true },
-  in_truck_searches: { label: 'Búsquedas en bodega', unit: '', lowerIsBetter: true },
-  space_utilisation_pct: { label: 'Uso del espacio', unit: '%', lowerIsBetter: false },
+  total_km: { label: 'Distància total', unit: 'km', lowerIsBetter: true },
+  total_minutes: { label: 'Temps total', unit: 'min', lowerIsBetter: true },
+  unload_minutes_estimated: { label: 'Temps de descàrrega', unit: 'min', lowerIsBetter: true },
+  in_truck_searches: { label: 'Cerques al camió', unit: '', lowerIsBetter: true },
+  space_utilisation_pct: { label: "Ús de l'espai", unit: '%', lowerIsBetter: false },
 };
 
 export default function KpiPanel({ delta }: Props) {

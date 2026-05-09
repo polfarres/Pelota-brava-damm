@@ -11,7 +11,7 @@ export default function ExplanationCard({ stop }: Props) {
     return (
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <p className="text-sm text-gray-500 italic">
-          Selecciona una parada para ver la explicación.
+          Selecciona una parada per veure&apos;n l&apos;explicació.
         </p>
       </div>
     );
@@ -31,7 +31,7 @@ export default function ExplanationCard({ stop }: Props) {
       {stop.pallet_slots && stop.pallet_slots.length > 0 && (
         <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
           <div className="bg-gray-100 rounded p-2">
-            <div className="text-gray-500">Pallet</div>
+            <div className="text-gray-500">Palet</div>
             <div className="font-bold text-base">{stop.pallet_slots.join(', ')}</div>
           </div>
           <div className="bg-gray-100 rounded p-2">
@@ -41,14 +41,14 @@ export default function ExplanationCard({ stop }: Props) {
         </div>
       )}
 
-      <div className="text-xs text-gray-500 uppercase font-bold mb-1">Por qué</div>
+      <div className="text-xs text-gray-500 uppercase font-bold mb-1">Per què</div>
       <p className="text-sm text-gray-800 leading-relaxed">
-        {stop.explanation || 'Sin explicación generada.'}
+        {stop.explanation || 'Sense explicació generada.'}
       </p>
 
       <div className="mt-3 pt-3 border-t border-gray-100">
         <div className="text-xs text-gray-500 uppercase font-bold mb-1">
-          Líneas a entregar ({stop.delivery_lines.length})
+          Línies a lliurar ({stop.delivery_lines.length})
         </div>
         <ul className="text-xs space-y-1">
           {stop.delivery_lines.map((l, i) => (

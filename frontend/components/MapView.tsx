@@ -95,7 +95,7 @@ export default function MapView({ stops, selectedSeq, onSelect, runId }: Props) 
   if (!mounted || !Components) {
     return (
       <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-500 rounded-lg">
-        Cargando mapa…
+        Carregant mapa…
       </div>
     );
   }

@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Smart Truck — DAMM',
-  description: 'Optimizador de ruta + carga conjunto para DDI Mollet',
+  description: 'Optimitzador conjunt de ruta i càrrega per a DDI Mollet',
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="es">
+    <html lang="ca">
       <body className="min-h-screen bg-gray-50 text-damm-dark">
         <header className="bg-damm-dark text-white px-6 py-3 flex items-center gap-6 shadow">
           <Link href="/" className="flex items-center gap-2 font-bold text-lg">
@@ -24,9 +24,9 @@ export default function RootLayout({
             </span>
           </Link>
           <nav className="flex gap-4 text-sm ml-auto">
-            <Link href="/" className="hover:text-damm-red">Dashboard</Link>
-            <Link href="/pick-list" className="hover:text-damm-red">Hoja Carga</Link>
-            <Link href="/truck" className="hover:text-damm-red">Truck Twin</Link>
+            <Link href="/" className="hover:text-damm-red">Tauler</Link>
+            <Link href="/pick-list" className="hover:text-damm-red">Full de Càrrega</Link>
+            <Link href="/truck" className="hover:text-damm-red">Camió</Link>
             <Link href="/driver" className="hover:text-damm-red">Conductor</Link>
           </nav>
         </header>
