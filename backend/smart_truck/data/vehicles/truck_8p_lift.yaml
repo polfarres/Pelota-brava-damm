@@ -1,0 +1,126 @@
+# DR-008 / A-34 — 8-pallet rigid truck with rear tail-lift (×4 in fleet).
+#
+# Same 2×4 partitioned grid as TRUCK_8P_SC, plus REAR access via the
+# ascensor (tail-lift). Each pallet is reachable from its own side curtain
+# AND from REAR (with rear-blocking adjacency: P7/P8 unblock first).
+#
+# Top view (rear of cargo box at right; ascensor pulls pallets out
+# starting at P7/P8 and working forward):
+#
+#       LEFT curtain  ↓
+#       +------+------+------+------+
+#       | P1   | P3   | P5   | P7   |   reachable_from = [LEFT, REAR]
+#       +======+======+======+======+   <-- central partition (reixa)
+#       | P2   | P4   | P6   | P8   |   reachable_from = [RIGHT, REAR]
+#       +------+------+------+------+
+#       RIGHT curtain ↑          rear doors + ascensor
+#
+# REAR LIFO (assumption pending MQ-D-21): strict back-to-front
+# [P7, P8, P5, P6, P3, P4, P1, P2]. Lateral access bypasses LIFO so
+# non-rearmost pallets remain reachable curtain-side.
+
+profile_id: TRUCK_8P_LIFT
+display_name: "Camió 8 palets cortina lateral + ascensor posterior"
+fleet_count: 4
+external_dim_cm: [920, 250, 330]
+internal_dim_cm: [780, 240, 240]
+access:
+  rear_doors: true
+  rear_lift: true
+  curtain: BOTH_SIDES_PARTITIONED
+  partition: true
+slots:
+  - id: P1
+    type: PALLET_FLOOR
+    pos_cm: [0, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT, REAR]
+    blocked_by_per_face:
+      REAR: [P3, P5, P7]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P3
+    type: PALLET_FLOOR
+    pos_cm: [195, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT, REAR]
+    blocked_by_per_face:
+      REAR: [P5, P7]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P5
+    type: PALLET_FLOOR
+    pos_cm: [390, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT, REAR]
+    blocked_by_per_face:
+      REAR: [P7]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P7
+    type: PALLET_FLOOR
+    pos_cm: [585, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT, REAR]
+    blocked_by_per_face:
+      REAR: []
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P2
+    type: PALLET_FLOOR
+    pos_cm: [0, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT, REAR]
+    blocked_by_per_face:
+      REAR: [P4, P6, P8]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P4
+    type: PALLET_FLOOR
+    pos_cm: [195, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT, REAR]
+    blocked_by_per_face:
+      REAR: [P6, P8]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P6
+    type: PALLET_FLOOR
+    pos_cm: [390, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT, REAR]
+    blocked_by_per_face:
+      REAR: [P8]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P8
+    type: PALLET_FLOOR
+    pos_cm: [585, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT, REAR]
+    blocked_by_per_face:
+      REAR: []
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+total_capacity_ce: 480.0
+nominal_payload_kg: 7500.0
+envase_zone_slot_ids: [P7, P8]
+lifo_order_per_face:
+  REAR: [P7, P8, P5, P6, P3, P4, P1, P2]
+schema_version: "1.1"

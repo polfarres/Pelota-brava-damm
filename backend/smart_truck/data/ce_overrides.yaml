@@ -1,0 +1,8 @@
+# DR-010 — Emergency CE per-unit overrides.
+#
+# Authoritative source is `Caixes_Estadístiques.xlsx` (delivered by mentor).
+# This file holds manual fixes for SKUs where both the master file and
+# the ZM040 ZCE row are wrong or missing. Format: SKU → CE per delivery unit.
+# Auto-flag rule: ETL warns when 60 / (zce_denom/100) ≠ pal_capacity within 5 %.
+
+"0CF0054": 1.0   # ZM040 ZCE row encodes 0.16 but PAL=60 cases/pallet; mentor confirms 1 CE.

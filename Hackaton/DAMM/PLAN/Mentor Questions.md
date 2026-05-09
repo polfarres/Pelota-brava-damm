@@ -23,35 +23,32 @@ Priorities:
 
 Open with one sentence to set context: *"Estamos optimizando ruta y carga conjuntamente para una carga real, la `11764300` del 8 de mayo del repartidor Fran Romero, ruta DR0027. Vamos a usarla como caso de estudio. Tenemos algunas dudas operativas para que el modelo refleje la realidad."*
 
-### 🔴 MQ-D-01 — Truck pallet geometry
+### ✅ MQ-D-01 — Truck pallet geometry — Resolved 2026-05-09 (mentor session)
 
-**Ask**: *"¿Cómo es exactamente la disposición física de pallets en un camión de 6 y de 8 palets? ¿Es 2×3 y 2×4? ¿Qué medida de palet usáis (europalet 80×120 o industrial 100×120)? ¿Y para los barriles y las bombonas de CO₂ — van también sobre palet o tienen su propia zona?"*
+**Refined by mentor input. Original A-01 superseded by A-30..A-34 and DR-008.**
 
-**Why**: A-01 in the spec is a guess. The hybrid load packer geometry (FR-006) is built on top of this assumption. If barrels go in a separate slot, the load model needs an extra zone type.
+Confirmed fleet topology (4 distinct profiles):
 
-**What we do**: lock the truck grid in `backend/smart_truck/optimize/load.py:TRUCK_LAYOUTS`. Decide whether barrels are first-class pallet positions or a separate "barrel zone".
+- **Furgoneta (×1, 3 pallets in line)** — pos 1 (deepest) accessible *only* via the lateral curtain; pos 2 & 3 accessible *only* via rear doors and follow LIFO (P3 out before P2). *"els tres estan en línia i el del fons es treu pel lateral."*
+- **6-pallet truck (×11, 2×3)** — opens *only* from the two side curtains; central partition (*reixa*) blocks cross-row access; no rear access.
+- **8-pallet truck (×4, 2×4)** — same partitioned regime as 6P; no rear access.
+- **8-pallet truck with tail-lift (×4, 2×4)** — partitioned curtains *and* rear doors with `ascensor`.
 
-**Fallback**: assume 2×3 / 2×4, EUR pallets, barrels treated as 1 pallet each.
+Capacity is **volumetric, not weight-based** (A-30). A pallet holds **60 caixes estadístiques (CE)** (A-31); per-SKU CE pulled from ZM040 `ZCE` UoM row.
 
-### 🔴 MQ-D-02 — Return rates per SKU class
+### ✅ MQ-D-02 — Return rate model — Resolved 2026-05-09 (mentor session)
 
-**Ask**: *"El brief dice que el 60% de productos son retornables. Para un cálculo realista, ¿podríais aproximar el ratio real de devolución de envases por tipo? Por ejemplo: barriles BRL30/BRL20, botellas RET, latas LT, sin retorno SR — ¿qué porcentaje de cada uno vuelve realmente al camión durante la entrega?"*
+**Mentor input supersedes original A-07.** New decision (A-35): **flat 60 % global return rate** applied to outbound CE per stop — replaces the prior per-class breakdown.
 
-**Why**: A-07 in the spec drives the entire returns / free-space tracker (FR-007). 60% global is too coarse — barrels are 100% returnable, one-way packs are 0%.
+Mentor noted seasonality: empirically lower in summer, higher in winter, but "no sabem quantitats exactes" — we don't model the variation in v1; reserve the nuance for the pitch only. See `MQ-D-23` if there's room to refine.
 
-**What we do**: populate `Product.expected_return_rate` per SKU class. Drives the volume of envases the truck must absorb.
+### ✅ MQ-D-03 — Ground truth for the demo carga — Resolved 2026-05-09
 
-**Fallback**: BRL=100%, RET=80%, SR=0%, others=60%.
+**Confirmed**: drivers follow the printed Hoja Ruta order. The route order is built taking the driver's local experience into account, AND the truck load is then arranged specifically for that order — drivers can't re-sequence on the road because the load layout assumes the printed sequence.
 
-### 🔴 MQ-D-03 — Ground truth for the demo carga
-
-**Ask**: *"Tenemos los PDFs Hoja Carga y Hoja Ruta de la carga 11764300, ruta DR0027, del 8 de mayo. ¿El orden de los clientes en la Hoja Ruta es el orden real en que Fran entregó? ¿O Fran cambió el orden sobre la marcha?"*
-
-**Why**: A-04 — our entire baseline KPI honesty depends on this. If the printed order isn't the real order, our "Smart Truck saves X%" claim is shaky.
-
-**What we do**: if printed order = real order, use it as-is. If not, ask the mentor for the real sequence (even verbally) and encode it as the baseline.
-
-**Fallback**: use printed order, footnote in pitch as "as-printed baseline".
+**Implications for our pitch**:
+- The printed order IS the ground truth baseline — KPI delta is honest.
+- A strong narrative emerges: "today, route order and truck load are *implicitly* coupled — the load is designed around the order. Smart Truck makes that coupling **explicit**, jointly optimised, and reproducible."
 
 ### ~~MQ-D-04~~ — Resolved 2026-05-09
 
@@ -61,65 +58,33 @@ The `Detalle entrega.Ruta` column uses the standard `DR…` codes throughout —
 
 `Horarios Entrega.Deudor` uses the standard 10-digit `9100…` customer IDs from row ~28 onwards (the first rows show legacy 6-digit IDs that we can drop during ETL). Direct join with `Direcciones.Cliente` works. No mentor question needed.
 
-### 🟡 MQ-D-06 — Time window defaults
+### ✅ MQ-D-06 — Time window defaults — Resolved 2026-05-09
 
-**Ask**: *"Solo 240 clientes tienen un horario explícito en el fichero de horarios. Los demás, ¿se considera que están abiertos durante el horario HoReCa estándar, o que el chófer ya conoce informalmente sus preferencias? Y los sábados — ¿no hay datos porque no se reparte, o porque ningún cliente tiene horario definido el sábado?"*
+`Horarios Entrega` is **complete**: every customer × weekday is explicit. `K = L = 00:00:00` means closed that day. No "default window" concept needed. Saturday is absent simply because customers are closed; Sunday (7) appears for the few customers open then.
 
-**Why**: A-05. Drives time-window feasibility for ~80% of customers.
+No mentor question required.
 
-**What we do**: encode the default window in `backend/smart_truck/optimize/route.py:DEFAULT_WINDOW`.
+### ✅ MQ-D-07 — Volumen Entrega units on Hoja Carga totals — Locked 2026-05-09
 
-**Fallback**: 08:00–14:00 + 17:00–22:00; assume Saturday closed.
+We **drop the volume KPI** for v1 and display weight + count only. Hoja Carga's printed `Total Volumen` numbers are not surfaced. No mentor question required.
 
-### 🟡 MQ-D-07 — Volumen Entrega units on Hoja Carga totals
+### ✅ MQ-D-08 — `SSTT` column on Hoja Ruta — Locked 2026-05-09
 
-**Ask**: *"En la Hoja Carga, los totales muestran `Total Volumen Entrega: 338.21` y `Total Volumen Devolución: 4`. ¿En qué unidad están — m³, litros, palets-equivalentes? Y ¿por qué la devolución de volumen es solo 4 si el peso de devolución son 2.094 kg?"*
+Decision: ignore the column entirely. No mentor question required.
 
-**Why**: We want to display volume KPIs honestly; getting the unit wrong makes the pitch sound wrong.
+### ✅ MQ-D-09 — Warehouse location code structure — Locked 2026-05-09
 
-**What we do**: label our KPI panel correctly; potentially recompute volume ourselves from `ZM040` if the printed totals use a non-obvious unit.
+Decision: lex sort, treat as opaque. No mentor question required.
 
-**Fallback**: don't display Hoja Carga's printed volume totals; compute and display only our own from ZM040 dimensions.
+### ✅ MQ-D-10 — Service time per stop — Locked 2026-05-09
 
-### 🟡 MQ-D-08 — `SSTT` column on Hoja Ruta
+Locked model: `service_time_min = 10 + 2 × distinct_in_truck_zones_touched`. Hybrid load packer reduces zones-touched per stop, materialising the unload-time saving.
 
-**Ask**: *"En la Hoja Ruta hay una columna `SSTT` que en nuestro ejemplo siempre es `NO`. ¿Qué representa? ¿Es una bandera operativa que pueda condicionar la ruta?"*
+**Ask the mentor anyway** (3 min) to calibrate the constants: *"Estamos modelando el tiempo por parada como 10 minutos base + 2 minutos por zona distinta del camión a la que tiene que acceder. ¿Coincide con tu intuición? ¿Cuánto tarda Fran de media en una parada hoy?"*
 
-**Why**: We don't want to ignore an operational flag that the driver actually acts on.
+### ✅ MQ-D-11 — How does the warehouse currently load the truck? — Resolved 2026-05-09
 
-**What we do**: if it's relevant (e.g. "S" means "send via subcontractor") we model it; otherwise we skip.
-
-**Fallback**: ignore the column.
-
-### 🟡 MQ-D-09 — Warehouse location code structure
-
-**Ask**: *"Los códigos de ubicación tipo `AA02A1`, `FA05A2`, `ZCG`, `A0DISTRIDA` — ¿siguen un esquema regular? ¿Las dos primeras letras son el pasillo y los siguientes dígitos la posición? Conocerlo nos permitiría ordenar la lista de picking de forma más natural para el preparador."*
-
-**Why**: We sort the Smart Hoja Carga by `Ubicación` lex order — confirming the structure means we can do something smarter (e.g. group by aisle).
-
-**What we do**: implement aisle-aware sort in FR-010.
-
-**Fallback**: lex sort.
-
-### 🟡 MQ-D-10 — Service time per stop
-
-**Ask**: *"¿Cuánto tarda Fran de media en una parada — desde que aparca hasta que arranca? ¿Y qué porcentaje de ese tiempo es buscar producto dentro del camión vs. descargar vs. cobrar / firmar?"*
-
-**Why**: A-06. Calibrates the unload-time-savings KPI. If currently 12 min/stop and 4 min is searching, our model can claim a credible reduction.
-
-**What we do**: encode the breakdown in `KpiEngine.SERVICE_TIME_MODEL`.
-
-**Fallback**: 10 min base + 2 min per distinct in-truck zone (our current assumption).
-
-### 🟡 MQ-D-11 — How does the warehouse currently load the truck?
-
-**Ask**: *"En la práctica, ¿cómo decide el preparador qué pallet va dónde dentro del camión? ¿Existe alguna convención (los retornables atrás, las bebidas frías cerca de la puerta) o es totalmente libre? ¿La columna `Descarga` de la Hoja Carga la rellena alguien manualmente alguna vez?"*
-
-**Why**: This is the heart of our pitch. If `Descarga` is *never* used, our intervention is genuinely free. If some drivers fill it themselves, we have to pitch our tool as automation, not introduction.
-
-**What we do**: tune the pitch wording; potentially show a v0 of the Smart Hoja Carga that mimics any existing convention.
-
-**Fallback**: assume `Descarga` is always blank.
+**Confirmed**: the `Descarga` column is **always blank** today. Pitch leads with "free intervention slot, zero-friction adoption". The `Lote` column is also always blank — ignore it for v1 (we don't read or write it).
 
 ### 🟢 MQ-D-12 — More demo data
 
@@ -141,25 +106,69 @@ The `Detalle entrega.Ruta` column uses the standard `DR…` codes throughout —
 
 **Fallback**: geocode ourselves with the technical mentor's API key.
 
-### 🟢 MQ-D-14 — CONTADO operational preference
+### ✅ MQ-D-14 — CONTADO operational preference — Locked 2026-05-09
 
-**Ask**: *"Las paradas CONTADO (cobro en efectivo) — ¿hay alguna preferencia operativa? ¿Se intentan agrupar al inicio del turno, o se hacen como caen en la ruta?"*
+Decision: flag in driver UI only, no routing impact. Mentor question optional — only ask if there's an obvious operational pattern they want us to encode.
 
-**Why**: If there's a real-world preference, the optimiser can incorporate it as a soft constraint.
+### ✅ MQ-D-15 — Driver familiarity — Locked 2026-05-09
 
-**What we do**: add an optional "prefer-CONTADO-early" mode.
+Decision: soft penalty (medium weight) on deviating from baseline, with a UI toggle ("familiar" vs "optimal"). Mentor question optional — useful as colour for the pitch, not blocking.
 
-**Fallback**: just flag CONTADO in the driver UI; no routing impact.
+### ✅ MQ-D-16 — Side-curtain symmetry on 6P / 8P — Resolved 2026-05-09 (mentor session)
 
-### 🟢 MQ-D-15 — Driver familiarity
+Mentor confirmed: 6P and 8P trucks have a **central partition (*reixa*)** between the two lateral rows; you cannot reach one row from the opposite curtain. Each side is independent. No rear access on the standard 6P / 8P. Modelled as `CurtainAccess.BOTH_SIDES_PARTITIONED` (A-33, DR-008).
 
-**Ask**: *"Los chóferes que llevan años haciendo la misma ruta — ¿qué pasaría si nuestro sistema les sugiere un orden distinto al que ellos siempre usan? ¿Lo aceptarían si está justificado, o prefieren mantener su orden conocido?"*
+### 🔴 MQ-D-17 — Vehicle profile resolution per matrícula
 
-**Why**: Validates the "driver familiarity bias" knob in FR-005.
+**Ask**: *"¿Existe alguna tabla matrícula → tipo de vehículo (6 palets / 8 palets / 8 palets con ascensor / furgoneta) para los ~470 vehículos de la flota? En particular, ¿la matrícula `7524KXX` (vehículo `V235045`, ruta DR0027 del 2026-05-08) corresponde a 6P, 8P o 8P+ascensor?"*
 
-**What we do**: tune the soft penalty weight; pitch the tool as "decision support" not "instruction".
+**Why**: The packer needs to resolve `V… → profile_id` automatically; otherwise we hard-code the demo route's vehicle.
 
-**Fallback**: leave the soft penalty at a default and explain the choice in the pitch.
+**What we do**: import the table at ETL time and join on `Vehículo` (Hoja Carga) / matrícula (Hoja Ruta).
+
+**Fallback**: hard-code `DR0027 → TRUCK_6P_SC` (the most numerous fleet class — 11 / 20 vehicles) and surface a "vehicle resolution unknown" warning for any other route. Pitch is unaffected.
+
+### 🟡 MQ-D-18 — Furgoneta lateral side
+
+**Ask**: *"En la furgoneta 3 palets, el palet del fondo se extrae por el lateral. ¿Por el lateral izquierdo o por el derecho? ¿Es la misma puerta lateral siempre, o cualquiera de los dos?"*
+
+**Why**: Encodes `Slot.reachable_from` for `FURGO_3P.P1`.
+
+**Fallback**: assume `LEFT`. Cosmetic if wrong; the only consequence is which side of the truck twin animates.
+
+### ✅ MQ-D-19 — Kegs and pallets — Resolved 2026-05-09 (CE model)
+
+The volumetric (CE) model handles kegs uniformly: 1 keg = 4 CE → 15 kegs per pallet (A-31, verified). No need for a separate floor zone in v1. The `FLOOR_KEG` slot type stays in DR-008 for future refinement but is not populated in any current profile.
+
+### 🟢 MQ-D-20 — BRL colour semantics
+
+**Ask**: *"Las cajas BRL de colores (rojo, azul, verde / SANMY) — ¿el color identifica el cliente, la categoría de producto, o no significa nada operativamente?"*
+
+**Why**: Could enable a soft clustering bonus per colour in the packer.
+
+**Fallback**: ignore colour in v1.
+
+### 🔴 MQ-D-21 — TRUCK_8P_LIFT rear-door access depth
+
+**Ask**: *"En los 4 camiones de 8 palets con ascensor trasero, cuando se usa la puerta de atrás, ¿cuántos palets se pueden bajar antes de tener que mover los demás? ¿Solo los 2 traseros, o se puede llegar más adentro porque el `ascensor` saca el palet ya completo?"*
+
+**Why**: Drives the `TRUCK_8P_LIFT.lifo_order_per_face[REAR]` encoding. If only the 2 rearmost are reachable, `[P7, P8]` blocks everything else; if all 8 are reachable in strict LIFO, `[P7, P8, P5, P6, P3, P4, P1, P2]`.
+
+**Fallback**: strict LIFO `[P7..P1]`; lateral curtains remain the primary access path for non-rearmost slots.
+
+### ✅ MQ-D-22 — CE consistency — Largely resolved 2026-05-09
+
+Mentor will deliver `Caixes_Estadístiques.xlsx` with CE per delivery unit for every SKU. This file becomes the authoritative source (DR-010). ZM040 `ZCE` row remains as fallback only. The `0CF0054` discrepancy is no longer blocking — the new file resolves it correctly.
+
+**Optional follow-up** (2 min if mentor offers time): *"¿Sabes si el fichero de CE incluye también los SKUs de envases (3ENV…, BRL30V, TB8V) o solo producto lleno?"* — drives whether outbound envases need a CE override.
+
+### 🟢 MQ-D-23 — Returns rate seasonality
+
+**Ask**: *"Para el ratio de devolución del 60 %, mencionaste que en verano es menor y en invierno mayor. ¿Tienes algún rango típico (ej. julio = 50 %, enero = 70 %)? Aunque no lo modelemos en v1, nos serviría para mencionarlo en el pitch."*
+
+**Why**: Pitch colour. Not blocking.
+
+**Fallback**: present 60 % flat with the seasonal direction qualitatively.
 
 ---
 
@@ -173,97 +182,54 @@ Decision 2026-05-09: **demo runs on localhost** for v1. Pitch will use the team'
 
 **Fallback (only if we revisit)**: Vercel free tier (frontend) + Render free tier (backend) on default subdomains.
 
-### 🔴 MQ-T-02 — Geocoding + map API key
+### ✅ MQ-T-02 — Geocoding — Locked 2026-05-09
 
-**Ask**: *"¿Nos podéis facilitar una API key de Mapbox o Google Maps para el evento? La usaremos para (a) geocodificar 1.200 direcciones de clientes y (b) renderizar el mapa de ruta en el frontend. Sin key, dependemos de Nominatim que tiene rate-limit y puede no terminar a tiempo."*
+Decision: **Nominatim** (OpenStreetMap), no key, 1 req/sec, results cached to `backend/data/geo_cache.json`. No mentor question required.
 
-**Why**: The 1,200-address geocode against Nominatim takes ~20 minutes if it doesn't get blocked; against Mapbox it takes seconds.
+### ✅ MQ-T-03 — Tile / map service — Locked 2026-05-09
 
-**What we do**: kick off the geocode batch as soon as we have the key.
+Decision: **Leaflet + CartoDB Positron** tiles, no key. No mentor question required.
 
-**Fallback**: Nominatim with 1 req/sec backoff, started at hour 0.
+### 🟢 MQ-T-04 — HTTPS + CORS — Deferred (localhost only for v1)
 
-### 🟡 MQ-T-03 — Tile / map service
+Localhost demo: backend at `:8000`, frontend at `:3000`. Configure FastAPI CORS to allow `http://localhost:3000`. Trivial; no mentor needed.
 
-**Ask**: *"Para el mapa interactivo del frontend, ¿usamos las tiles de Mapbox (mismas que el geocoder), Google Maps, o algo OSM como Leaflet+Carto? ¿El evento tiene preferencia o cuenta de prueba?"*
+### ✅ MQ-T-05 — PDF rendering — Locked 2026-05-09
 
-**Why**: Mapbox/Google look polished; OSM tiles look amateur next to them.
+Decision: **ReportLab** (pure Python). No mentor question required.
 
-**What we do**: standardise on whatever we get a key for.
+### ✅ MQ-T-06 — Backend persistence — Locked 2026-05-09
 
-**Fallback**: Leaflet + OSM tiles.
+Decision: parquet files in repo, regenerated by ETL. No DB. No mentor question required.
 
-### 🟡 MQ-T-04 — HTTPS + CORS
+### 🟢 MQ-T-07 — Observability — Defer
 
-**Ask**: *"Si frontend y backend están en dominios diferentes, ¿qué configuración de CORS y certificados HTTPS recomiendas para el deploy? Queremos evitar sorpresas el día del pitch."*
+Stdout logs are sufficient for a localhost demo. Skip Sentry / error-tracking unless we have spare time at hour 20+.
 
-**Why**: Mixed-content errors and CORS rejections kill demos.
-
-**What we do**: configure FastAPI CORS middleware and force HTTPS in both deploys.
-
-**Fallback**: deploy frontend and backend under the same domain via Vercel rewrites.
-
-### 🟡 MQ-T-05 — Print-to-PDF on the deploy target
-
-**Ask**: *"Vamos a generar PDFs en el backend para reproducir las Hoja Carga y Hoja Ruta de DAMM con nuestras anotaciones. Pensábamos usar WeasyPrint (HTML/CSS → PDF) — ¿tiene problemas en Render/Fly/etc.? Si sí, ¿qué alternativa recomiendas?"*
-
-**Why**: WeasyPrint depends on Pango/Cairo system libs; some serverless platforms don't have them. Better to learn early than at hour 18.
-
-**What we do**: pick the toolchain (WeasyPrint vs. ReportLab vs. headless Chrome) based on advice.
-
-**Fallback**: ReportLab (pure Python, ugly but reliable).
-
-### 🟢 MQ-T-06 — Backend persistence
-
-**Ask**: *"¿Necesitamos una base de datos managed para la demo, o es suficiente con archivos parquet en disco / volumen montado? Sería un volumen de unos 200 MB."*
-
-**Why**: A managed DB adds setup time we don't have.
-
-**What we do**: probably just files; ask anyway in case the platform has a free Postgres they recommend.
-
-**Fallback**: parquet on the container's local disk; reload on cold start (acceptable since data is static).
-
-### 🟢 MQ-T-07 — Observability for the demo
-
-**Ask**: *"¿Recomiendas algún logging / error-tracking ligero para el día del pitch? Si la API revienta delante de los jueces, queremos saberlo en 2 segundos."*
-
-**Why**: Sentry free tier or similar catches the embarrassing crash before the panel notices.
-
-**What we do**: integrate it if it's a 5-minute setup.
-
-**Fallback**: structured logs to stdout; check before the pitch.
-
-### 🟢 MQ-T-08 — Domain & SSL ownership
-
-**Ask**: *"Si nos dan la subruta `smart-truck.<dominio-del-evento>`, ¿quién es el owner del dominio, y a quién hay que escribir si hay un problema con el certificado SSL durante el evento?"*
-
-**Why**: When something breaks at hour 23 we want a name, not a process.
-
-**What we do**: save the contact in `README.md`.
+### 🟢 MQ-T-08 — Domain & SSL ownership — N/A (localhost only)
 
 ---
 
-## Suggested meeting plan
+## Suggested meeting plan (post 2026-05-09 user lock-in)
 
-If we get 30 minutes total per mentor, here's the order:
+Most questions are now locked by team decision. Use the DAMM mentor as a sanity check + to unblock the few remaining open items. The technical mentor session is no longer necessary for v1 since localhost + free providers cover everything.
 
-**DAMM (30 min)**:
-1. Set context (1 min) — DR0027 / 2026-05-08 as our case.
-2. MQ-D-01 (3 min)
-3. MQ-D-02 (3 min)
-4. MQ-D-03 (4 min) — possibly the longest because we walk through the actual paperwork.
-5. MQ-D-11 (3 min) — central to pitch.
-6. MQ-D-06, 07, 08, 09, 10 in rapid fire (10 min) — minor calibrations.
-7. Buffer for follow-ups (6 min).
-8. The 🟢 questions only if minutes remain.
+**DAMM mentor (15 min, focused)** — most v1 items now resolved; remaining critical asks are around vehicle resolution.
 
-**Technical (15 min)**:
-1. MQ-T-01 + MQ-T-02 (8 min) — both have lead time and need to start *during* this conversation.
-2. MQ-T-04 + MQ-T-05 (5 min) — pick toolchain.
-3. The rest if minutes remain (2 min).
+1. Set context (1 min) — DR0027 / 2026-05-08, walk in with the printed Hoja Carga + the four vehicle profiles printed.
+2. **🔴 MQ-D-17** matrícula → tipo de vehículo table (3 min) — needed to scale beyond DR0027.
+3. **🔴 MQ-D-21** TRUCK_8P_LIFT rear-door access depth (3 min) — drives the LIFO encoding.
+4. **🟡 MQ-D-18** furgoneta lateral side (1 min).
+5. **🟡 MQ-D-10** sanity-check the 10 + 2 × zones service-time model (2 min).
+6. Confirm receipt of `Caixes_Estadístiques.xlsx` and ask whether envase SKUs are included (1 min, see MQ-D-22).
+7. Buffer (4 min) — let them volunteer anything we haven't asked.
 
-## After the meetings
+**Bonus asks if mentor offers more time**:
+- More demo days for DR0027 (validation set, MQ-D-12).
+- Internal lat/lon (would let us drop Nominatim, MQ-D-13).
+- BRL colour semantics (MQ-D-20).
+- Returns rate seasonal range (MQ-D-23).
 
-For each answer received, write a one-liner into `Specifications.md` § 5 *Open assumptions* either confirming or replacing the assumption (e.g. *"A-01 confirmed: 6-pallet trucks are 2×3, EUR pallets, barrels go on dedicated rear pallet slots — see meeting notes 2026-05-09 14:00."*).
+## After the meeting
 
-If a 🔴 question comes back blocked or the answer is ambiguous, *don't guess* — surface it in the team chat immediately so we can pick the fallback consciously rather than discover it at hour 14.
+For each answer received, update `Specifications.md` § 5 *Locked decisions* with a confirmation note (or, if mentor contradicts, a replacement). Surface contradictions in team chat so we adjust consciously.
