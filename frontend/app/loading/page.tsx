@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { MOCK_PLAN } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
-import { colorForCustomer } from '@/lib/colors';
+import { colorForCustomer, colorForSku } from '@/lib/colors';
 import type { Plan, StackLayer } from '@/lib/types';
 
 // react-three-fiber must not be SSR'd — Three.js needs the browser's
@@ -306,10 +306,13 @@ export default function LoadingPage() {
       </div>
 
       <p className="text-xs text-gray-500 mt-4">
-        Nota: els passos d&apos;una columna staple agrupen totes les caixes del
-        mateix SKU en una sola onada al magatzem (el camió rep tota la
-        columna del producte). Els palets LIFO es carreguen pel terra (última
-        parada) cap a dalt (primera parada).
+        El codi de colors a l&apos;escena 3D i a la llista és <strong>per producte</strong>:
+        cada SKU té el seu color, així el mosso pot creuar el quadradet de color
+        amb les ratlles del palet 3D directament.
+        Els passos d&apos;una columna staple agrupen totes les caixes del mateix
+        SKU en una sola onada al magatzem (el camió rep tota la columna del
+        producte). Els palets LIFO es carreguen pel terra (última parada) cap a
+        dalt (primera parada).
       </p>
     </div>
   );
@@ -384,8 +387,13 @@ function StepCard({
           </div>
           <ul className="mt-2 text-xs space-y-0.5">
             {step.lines.map((l, i) => (
-              <li key={i} className="flex justify-between bg-gray-50 px-2 py-1 rounded">
-                <span className="font-mono text-gray-500 w-20 flex-shrink-0">
+              <li key={i} className="flex items-center bg-gray-50 px-2 py-1 rounded">
+                <span
+                  className="inline-block w-3 h-3 rounded-sm flex-shrink-0"
+                  style={{ backgroundColor: colorForSku(l.sku) }}
+                  title={l.sku}
+                />
+                <span className="font-mono text-gray-500 w-20 flex-shrink-0 ml-2">
                   {l.ubicacion || '—'}
                 </span>
                 <span className="flex-1 truncate ml-2">{l.description || l.sku}</span>

@@ -10,7 +10,7 @@
 import { Suspense, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import { colorForCustomer } from '@/lib/colors';
+import { colorForSku } from '@/lib/colors';
 import type { Plan, StackLayer } from '@/lib/types';
 
 interface Props {
@@ -245,26 +245,36 @@ function PalletStack({
   if (loadedFull) {
     const totalCe = stack.reduce((s, l) => s + l.ce, 0);
     const h = Math.max(0.4, Math.min(cargoHeight - 0.1, (totalCe / 60) * (cargoHeight - 0.1)));
-    const uniqueCustomers: number[] = [];
+    // Stripes by SKU — one per distinct product in the slot, weighted
+    // by total CE in the slot (popular SKUs get a wider stripe).
+    const skuCe = new Map<string, number>();
     for (const layer of stack) {
-      if (!uniqueCustomers.includes(layer.customer_id)) {
-        uniqueCustomers.push(layer.customer_id);
+      for (const ln of layer.lines) {
+        skuCe.set(ln.sku, (skuCe.get(ln.sku) ?? 0) + (ln.ce ?? 1) * ln.quantity);
       }
     }
-    const stripeCount = Math.min(uniqueCustomers.length, 8);
-    const stripeWidth = depth / Math.max(1, stripeCount);
+    const skuList = [...skuCe.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+    const totalStripeCe = skuList.reduce((s, [, ce]) => s + ce, 0) || 1;
+    let xCursor = -depth / 2;
     return (
       <group position={[0, palletTop + h / 2, 0]}>
-        {uniqueCustomers.slice(0, 8).map((cid, i) => (
-          <mesh
-            key={`${slotId}-${cid}-${i}`}
-            castShadow
-            position={[-depth / 2 + stripeWidth / 2 + i * stripeWidth, 0, 0]}
-          >
-            <boxGeometry args={[stripeWidth - 0.02, h, width - 0.04]} />
-            <meshStandardMaterial color={colorForCustomer(cid)} />
-          </mesh>
-        ))}
+        {skuList.map(([sku, ce]) => {
+          const stripeWidth = (ce / totalStripeCe) * depth;
+          const cx = xCursor + stripeWidth / 2;
+          xCursor += stripeWidth;
+          return (
+            <mesh
+              key={`${slotId}-${sku}`}
+              castShadow
+              position={[cx, 0, 0]}
+            >
+              <boxGeometry args={[Math.max(stripeWidth - 0.02, 0.04), h, width - 0.04]} />
+              <meshStandardMaterial color={colorForSku(sku)} />
+            </mesh>
+          );
+        })}
         {/* Staple star marker — only on actual Tier-1 staple columns. */}
         {isStaple && (
           <mesh position={[0, h / 2 + 0.12, 0]}>
@@ -278,7 +288,8 @@ function PalletStack({
 
   // LIFO pallet: render visible layers stacked bottom-up.
   // stack is TOP→BOTTOM, so we render in reverse: stack[N-1] (last
-  // delivered) at the bottom of the pile.
+  // delivered) at the bottom of the pile. Each layer is split into
+  // SKU stripes weighted by their CE within the layer.
   const reversed = [...stack].reverse(); // bottom-first
   const totalCe = stack.reduce((s, l) => s + l.ce, 0) || 1;
   const totalHeight = Math.max(0.4, Math.min(cargoHeight - 0.1, (totalCe / 60) * (cargoHeight - 0.1)));
@@ -292,15 +303,35 @@ function PalletStack({
         const yCenter = yCursor + layerH / 2;
         yCursor += layerH;
         if (!loadedLayerKeys.has(key)) return null;
+
+        // SKU stripes for this layer — width proportional to ce per SKU.
+        const skuCeMap = new Map<string, number>();
+        for (const ln of layer.lines) {
+          skuCeMap.set(ln.sku, (skuCeMap.get(ln.sku) ?? 0) + (ln.ce ?? 1) * ln.quantity);
+        }
+        const layerSkus = [...skuCeMap.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8);
+        const layerSkuTotal = layerSkus.reduce((s, [, ce]) => s + ce, 0) || 1;
+        let xCursor = -depth / 2;
         return (
-          <mesh
-            key={key}
-            castShadow
-            position={[0, yCenter, 0]}
-          >
-            <boxGeometry args={[depth - 0.04, layerH * 0.95, width - 0.04]} />
-            <meshStandardMaterial color={colorForCustomer(layer.customer_id)} />
-          </mesh>
+          <group key={key} position={[0, yCenter, 0]}>
+            {layerSkus.map(([sku, ce]) => {
+              const stripeWidth = (ce / layerSkuTotal) * (depth - 0.04);
+              const cx = xCursor + stripeWidth / 2;
+              xCursor += stripeWidth;
+              return (
+                <mesh
+                  key={`${key}-${sku}`}
+                  castShadow
+                  position={[cx, 0, 0]}
+                >
+                  <boxGeometry args={[Math.max(stripeWidth - 0.01, 0.02), layerH * 0.95, width - 0.04]} />
+                  <meshStandardMaterial color={colorForSku(sku)} />
+                </mesh>
+              );
+            })}
+          </group>
         );
       })}
     </group>

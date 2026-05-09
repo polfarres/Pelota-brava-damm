@@ -20,6 +20,7 @@ export interface DeliveryLine {
   lote: string | null;
   is_envase: boolean;
   is_returnable: boolean;
+  ce?: number; // pallet-space units per item (CE per unit), from backend
 }
 
 export interface StackLayer {

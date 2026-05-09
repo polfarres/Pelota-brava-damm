@@ -41,4 +41,14 @@ export function colorForStopSequence(seq: number): string {
   return PALETTE[(seq - 1) % PALETTE.length];
 }
 
+export function colorForSku(sku: string): string {
+  // Same hash-by-string approach as colorForCustomer. Used in the 3D
+  // warehouse loading scene where the picker thinks in SKU terms.
+  let h = 0;
+  for (let i = 0; i < sku.length; i++) {
+    h = (h * 31 + sku.charCodeAt(i)) >>> 0;
+  }
+  return PALETTE[h % PALETTE.length];
+}
+
 export const PALETTE_FALLBACK = '#9CA3AF'; // gray-400 for unknowns

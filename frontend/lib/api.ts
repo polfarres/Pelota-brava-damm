@@ -209,6 +209,7 @@ function adaptDeliveryLine(l: BackendDeliveredLine): DeliveryLine {
     lote: null,
     is_envase: false,
     is_returnable: false,
+    ce: l.ce,
   };
 }
 
