@@ -1,20 +1,61 @@
-/**
- * Typed client for the Smart Truck FastAPI backend (FR-012).
- *
- * The shape of `Plan` mirrors the canonical types in
- * `Hackaton/DAMM/PLAN/Specifications.md` § 2.
- */
+// Typed API client for the Smart Truck backend.
+// Backend ships at NEXT_PUBLIC_API_URL (default http://localhost:8000).
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import type { BaselinePlan, Customer, Plan } from './types';
 
-export type Health = { status: string };
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-export async function getHealth(): Promise<Health> {
-  const r = await fetch(`${API_URL}/health`, { cache: "no-store" });
-  if (!r.ok) throw new Error(`health check failed: ${r.status}`);
-  return r.json();
+async function safeFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${API_URL}${path}`;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(init?.headers || {}),
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`API ${path} failed: ${res.status}`);
+  }
+  return (await res.json()) as T;
 }
 
-// TODO (FR-012):
-//   export async function postPlan({ ruta, fecha }: { ruta: string; fecha: string }): Promise<Plan>
-//   export async function getBaseline({ ruta, fecha }: { ruta: string; fecha: string }): Promise<BaselinePlan>
+export async function getHealth(): Promise<{ status: string }> {
+  return safeFetch('/health');
+}
+
+export async function getBaseline(
+  ruta: string,
+  fecha: string,
+): Promise<BaselinePlan> {
+  return safeFetch<BaselinePlan>(
+    `/baseline?ruta=${encodeURIComponent(ruta)}&fecha=${encodeURIComponent(
+      fecha,
+    )}`,
+  );
+}
+
+export async function getCustomer(id: number): Promise<Customer> {
+  return safeFetch<Customer>(`/customers/${id}`);
+}
+
+export async function postPlan(
+  ruta: string,
+  fecha: string,
+): Promise<Plan> {
+  return safeFetch<Plan>(`/plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ruta, fecha }),
+  });
+}
+
+export function hojaCargaPdfUrl(runId: string): string {
+  return `${API_URL}/plan/${runId}/hoja-carga.pdf`;
+}
+
+export function hojaRutaPdfUrl(runId: string): string {
+  return `${API_URL}/plan/${runId}/hoja-ruta.pdf`;
+}
