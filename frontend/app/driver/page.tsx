@@ -240,7 +240,6 @@ function DriverScreen({
 }) {
   const colour = colorForCustomer(stop.customer_id);
   const aggregated = useMemo(() => aggregateLines(stop.delivery_lines), [stop.delivery_lines]);
-  const cashTotal = stop.cash_total ?? stop.proforma_total ?? 0;
 
   return (
     <>
@@ -275,16 +274,6 @@ function DriverScreen({
             <Pill label="Finestra" value="Obert" accent="#9CA3AF" />
           )}
         </div>
-
-        {/* Cash collection */}
-        {stop.payment_condition === 'CONTADO' && (
-          <div className="bg-yellow-100 border-2 border-yellow-300 rounded-lg p-3">
-            <div className="text-xs uppercase font-bold text-yellow-900">💰 Cobrament en metàl·lic</div>
-            <div className="text-2xl font-bold text-yellow-900 mt-0.5">
-              {Number(cashTotal).toFixed(2)} €
-            </div>
-          </div>
-        )}
 
         {/* Action: which curtain + which slot */}
         <div className="bg-damm-red text-white rounded-lg p-3 text-center">
