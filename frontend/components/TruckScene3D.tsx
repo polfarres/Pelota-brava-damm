@@ -218,6 +218,121 @@ function CargoBay({
   );
 }
 
+// Pallet grid: 10 boxes per level (4 + 4 + 2) × 6 levels = 60 boxes max.
+//
+// User-spec footprint per level:
+//   row 0:  [ ][ ][ ][ ]    cellInLevel 0..3   (back, near cabin)
+//   row 1:  [ ][ ][ ][ ]    cellInLevel 4..7   (middle)
+//   row 2:    [ ][ ]        cellInLevel 8..9   (front, short row, centered)
+//
+// LIFO loading order = cell index ascending: bottom level first, back
+// row first within a level. This way the LAST-delivered customer's
+// boxes end up at the bottom-back (least accessible) and the FIRST
+// customer's at the top, mirroring A-38.
+const PALLET_LEVELS = 6;
+const CELLS_PER_LEVEL = 10;
+const TOTAL_CELLS = PALLET_LEVELS * CELLS_PER_LEVEL;
+
+interface PalletCell {
+  level: number;          // 0 = bottom of the pallet
+  cellInLevel: number;    // 0..9
+  sku: string;
+  customer_id: number;
+  stop_sequence: number;
+  layerKey: string;       // `${slotId}::${stop_sequence}`
+}
+
+function buildPalletCells(slotId: string, stack: StackLayer[]): PalletCell[] {
+  // Walk the stack in load order: stack is TOP→BOTTOM so we reverse
+  // to get bottom (last-delivered) first.
+  const reversed = [...stack].reverse();
+  const cells: PalletCell[] = [];
+  let cursor = 0;
+
+  for (const layer of reversed) {
+    if (cursor >= TOTAL_CELLS) break;
+    const layerCells = Math.max(
+      1,
+      Math.min(TOTAL_CELLS - cursor, Math.round(layer.ce)),
+    );
+
+    // Distribute the layer's cells across its SKUs proportionally
+    // to each SKU's CE share.
+    const skuCe = new Map<string, number>();
+    for (const ln of layer.lines) {
+      skuCe.set(ln.sku, (skuCe.get(ln.sku) ?? 0) + (ln.ce ?? 1) * ln.quantity);
+    }
+    const totalCe = [...skuCe.values()].reduce((a, b) => a + b, 0) || 1;
+    const perSku: { sku: string; count: number }[] = [];
+    for (const [sku, ce] of skuCe) {
+      perSku.push({ sku, count: Math.max(1, Math.round((ce / totalCe) * layerCells)) });
+    }
+    let allocated = perSku.reduce((s, p) => s + p.count, 0);
+    while (allocated > layerCells && perSku.length) {
+      // Trim from the largest bucket — never below 1 cell.
+      const i = perSku.reduce((mi, p, j) => (p.count > perSku[mi].count ? j : mi), 0);
+      if (perSku[i].count <= 1) break;
+      perSku[i].count--;
+      allocated--;
+    }
+
+    const layerKey = `${slotId}::${layer.stop_sequence}`;
+    for (const { sku, count } of perSku) {
+      for (let i = 0; i < count && cursor < TOTAL_CELLS; i++) {
+        cells.push({
+          level: Math.floor(cursor / CELLS_PER_LEVEL),
+          cellInLevel: cursor % CELLS_PER_LEVEL,
+          sku,
+          customer_id: layer.customer_id,
+          stop_sequence: layer.stop_sequence,
+          layerKey,
+        });
+        cursor++;
+      }
+    }
+  }
+  return cells;
+}
+
+/** Returns ``[localX, localY, localZ]`` and ``[sx, sy, sz]`` (size) for
+ * a cell on a pallet of footprint ``depth × width``. The pallet's local
+ * origin is centred on the slot floor; +X = rear of truck, +Y = up,
+ * +Z = right curtain. */
+function cellTransform(
+  level: number,
+  cellInLevel: number,
+  depth: number,
+  width: number,
+  cellHeight: number,
+  palletTop: number,
+): { pos: [number, number, number]; size: [number, number, number] } {
+  // Map cellInLevel → (rowIdx, colIdx).  Row spans X (depth axis); col
+  // spans Z (width axis). Row 2 has only 2 cells, centred (cols 1 & 2).
+  let rowIdx: number;
+  let colIdx: number;
+  if (cellInLevel < 4) {
+    rowIdx = 0;
+    colIdx = cellInLevel;             // 0..3
+  } else if (cellInLevel < 8) {
+    rowIdx = 1;
+    colIdx = cellInLevel - 4;         // 0..3
+  } else {
+    rowIdx = 2;
+    colIdx = cellInLevel - 8 + 1;     // 1..2 (centred)
+  }
+
+  const cellDepth = depth / 3;
+  const cellWidth = width / 4;
+  const x = -depth / 2 + (rowIdx + 0.5) * cellDepth;
+  const z = -width / 2 + (colIdx + 0.5) * cellWidth;
+  const y = palletTop + (level + 0.5) * cellHeight;
+
+  return {
+    pos: [x, y, z],
+    size: [cellDepth * 0.94, cellHeight * 0.92, cellWidth * 0.94],
+  };
+}
+
 function PalletStack({
   slotId,
   stack,
@@ -237,103 +352,49 @@ function PalletStack({
   depth: number;
   cargoHeight: number;
 }) {
-  const palletTop = 0.16;        // top surface of the pallet base
+  const palletTop = 0.16;
+  // Each cell is one standard caja. Total stack height = 6 cells.
+  const cellHeight = (cargoHeight - 0.2) / PALLET_LEVELS;
 
-  // Whole-pallet rendering: covers both staples (Tier-1 SKU column)
-  // and barrel/aggregated pallets where per-layer rounding zeroed
-  // everything out and the picker loads the slot in one warehouse wave.
-  if (loadedFull) {
-    const totalCe = stack.reduce((s, l) => s + l.ce, 0);
-    const h = Math.max(0.4, Math.min(cargoHeight - 0.1, (totalCe / 60) * (cargoHeight - 0.1)));
-    // Stripes by SKU — one per distinct product in the slot, weighted
-    // by total CE in the slot (popular SKUs get a wider stripe).
-    const skuCe = new Map<string, number>();
-    for (const layer of stack) {
-      for (const ln of layer.lines) {
-        skuCe.set(ln.sku, (skuCe.get(ln.sku) ?? 0) + (ln.ce ?? 1) * ln.quantity);
-      }
-    }
-    const skuList = [...skuCe.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8);
-    const totalStripeCe = skuList.reduce((s, [, ce]) => s + ce, 0) || 1;
-    let xCursor = -depth / 2;
-    return (
-      <group position={[0, palletTop + h / 2, 0]}>
-        {skuList.map(([sku, ce]) => {
-          const stripeWidth = (ce / totalStripeCe) * depth;
-          const cx = xCursor + stripeWidth / 2;
-          xCursor += stripeWidth;
-          return (
-            <mesh
-              key={`${slotId}-${sku}`}
-              castShadow
-              position={[cx, 0, 0]}
-            >
-              <boxGeometry args={[Math.max(stripeWidth - 0.02, 0.04), h, width - 0.04]} />
-              <meshStandardMaterial color={colorForSku(sku)} />
-            </mesh>
-          );
-        })}
-        {/* Staple star marker — only on actual Tier-1 staple columns. */}
-        {isStaple && (
-          <mesh position={[0, h / 2 + 0.12, 0]}>
-            <sphereGeometry args={[0.12, 16, 16]} />
-            <meshStandardMaterial color="#E30613" emissive="#E30613" emissiveIntensity={0.5} />
-          </mesh>
-        )}
-      </group>
-    );
-  }
+  const cells = useMemo(() => buildPalletCells(slotId, stack), [slotId, stack]);
 
-  // LIFO pallet: render visible layers stacked bottom-up.
-  // stack is TOP→BOTTOM, so we render in reverse: stack[N-1] (last
-  // delivered) at the bottom of the pile. Each layer is split into
-  // SKU stripes weighted by their CE within the layer.
-  const reversed = [...stack].reverse(); // bottom-first
-  const totalCe = stack.reduce((s, l) => s + l.ce, 0) || 1;
-  const totalHeight = Math.max(0.4, Math.min(cargoHeight - 0.1, (totalCe / 60) * (cargoHeight - 0.1)));
+  // Decide which cells to render:
+  // - loadedFull → all cells of this slot (whole-pallet wave done).
+  // - loadedLayerKeys → cells belonging to that specific layer (LIFO).
+  const visibleCells = cells.filter(
+    (c) => loadedFull || loadedLayerKeys.has(c.layerKey),
+  );
 
-  let yCursor = palletTop;
   return (
     <group>
-      {reversed.map((layer) => {
-        const key = `${slotId}::${layer.stop_sequence}`;
-        const layerH = (layer.ce / totalCe) * totalHeight;
-        const yCenter = yCursor + layerH / 2;
-        yCursor += layerH;
-        if (!loadedLayerKeys.has(key)) return null;
-
-        // SKU stripes for this layer — width proportional to ce per SKU.
-        const skuCeMap = new Map<string, number>();
-        for (const ln of layer.lines) {
-          skuCeMap.set(ln.sku, (skuCeMap.get(ln.sku) ?? 0) + (ln.ce ?? 1) * ln.quantity);
-        }
-        const layerSkus = [...skuCeMap.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 8);
-        const layerSkuTotal = layerSkus.reduce((s, [, ce]) => s + ce, 0) || 1;
-        let xCursor = -depth / 2;
+      {visibleCells.map((c) => {
+        const { pos, size } = cellTransform(
+          c.level,
+          c.cellInLevel,
+          depth,
+          width,
+          cellHeight,
+          palletTop,
+        );
         return (
-          <group key={key} position={[0, yCenter, 0]}>
-            {layerSkus.map(([sku, ce]) => {
-              const stripeWidth = (ce / layerSkuTotal) * (depth - 0.04);
-              const cx = xCursor + stripeWidth / 2;
-              xCursor += stripeWidth;
-              return (
-                <mesh
-                  key={`${key}-${sku}`}
-                  castShadow
-                  position={[cx, 0, 0]}
-                >
-                  <boxGeometry args={[Math.max(stripeWidth - 0.01, 0.02), layerH * 0.95, width - 0.04]} />
-                  <meshStandardMaterial color={colorForSku(sku)} />
-                </mesh>
-              );
-            })}
-          </group>
+          <mesh
+            key={`${slotId}-${c.level}-${c.cellInLevel}`}
+            castShadow
+            receiveShadow
+            position={pos}
+          >
+            <boxGeometry args={size} />
+            <meshStandardMaterial color={colorForSku(c.sku)} />
+          </mesh>
         );
       })}
+      {/* Staple star marker — appears once any cell is loaded. */}
+      {isStaple && loadedFull && (
+        <mesh position={[0, palletTop + cargoHeight - 0.05, 0]}>
+          <sphereGeometry args={[0.12, 16, 16]} />
+          <meshStandardMaterial color="#E30613" emissive="#E30613" emissiveIntensity={0.5} />
+        </mesh>
+      )}
     </group>
   );
 }
