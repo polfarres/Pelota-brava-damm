@@ -510,12 +510,25 @@ def plan(
     # 6. Build StopPlan list.
     eta_by_cid = {cid: eta for cid, eta in zip(rs.ordered_customer_ids, rs.etas)}
 
+    # in_truck_zones_touched per StopPlan: count of distinct truck slots
+    # this stop's items live in, which is what the KPI engine consumes
+    # (drives service_time = 10 + 2*zones_touched, A-06). The hybrid load
+    # packer's whole point is to cluster each customer into one slot, so
+    # this is typically 1 — and that's where the operational saving shows
+    # up against the baseline's ~5 (avg outbound lines per stop).
+    slot_count_by_stop: dict[int, int] = {}
+    for slot in slot_assignments:
+        if slot.is_envase_zone:
+            continue
+        for seq in slot.stop_sequences:
+            slot_count_by_stop[seq] = slot_count_by_stop.get(seq, 0) + 1
+
     stop_plans: list[StopPlan] = []
     for stop in resequenced:
         info = geo.get(stop.customer_id, ("?", "", None, None))
         # CE returnable estimate per A-35
         returnable_ce_total = sum(l.ce * l.quantity for l in stop.lines)
-        zones_touched = len({l.source_ubicacion for l in stop.lines if l.source_ubicacion})
+        zones_touched = max(1, slot_count_by_stop.get(stop.sequence, 1))
         stop_plans.append(StopPlan(
             sequence=stop.sequence,
             customer_id=stop.customer_id,
