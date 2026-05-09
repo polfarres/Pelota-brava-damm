@@ -1,0 +1,41 @@
+# Microsoft Office temp / lock files
+~$*
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor/IDE local state
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python (for the upcoming backend/)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+*.egg-info/
+.pytest_cache/
+
+# Node / Next.js (for the upcoming frontend/)
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build / cache artefacts
+dist/
+build/
+*.log
+
+# Local data caches (geocoding etc.) — commit only the curated parquet files
+backend/data/geo_cache.json
+backend/data/processed/
