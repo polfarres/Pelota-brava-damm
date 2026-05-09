@@ -35,13 +35,13 @@ Open with one sentence to set context: *"Estamos optimizando ruta y carga conjun
 
 **Ask the mentor anyway** (3 min): *"Estamos asumiendo BRL 100%, RET 80%, SR 0%, otros 60%. ¿Veis bien esos números o hay categorías con un ratio de devolución sustancialmente distinto?"*
 
-### 🔴 MQ-D-03 — Ground truth for the demo carga — STILL OPEN, ask mentor
+### ✅ MQ-D-03 — Ground truth for the demo carga — Resolved 2026-05-09
 
-We've decided to **trust the printed Hoja Ruta order** as Fran's actual sequence for v1, but we still want a sanity check from the mentor.
+**Confirmed**: drivers follow the printed Hoja Ruta order. The route order is built taking the driver's local experience into account, AND the truck load is then arranged specifically for that order — drivers can't re-sequence on the road because the load layout assumes the printed sequence.
 
-**Ask**: *"Tenemos los PDFs Hoja Carga y Hoja Ruta de la carga 11764300, ruta DR0027, del 8 de mayo. ¿El orden de los clientes en la Hoja Ruta es el orden real en que Fran entregó? ¿O Fran cambió el orden sobre la marcha?"*
-
-**If mentor says "no, Fran resequences in the field"**: ask for the real sequence verbally and encode it as the baseline; otherwise our pitch's KPI delta is overstated.
+**Implications for our pitch**:
+- The printed order IS the ground truth baseline — KPI delta is honest.
+- A strong narrative emerges: "today, route order and truck load are *implicitly* coupled — the load is designed around the order. Smart Truck makes that coupling **explicit**, jointly optimised, and reproducible."
 
 ### ~~MQ-D-04~~ — Resolved 2026-05-09
 
@@ -75,13 +75,9 @@ Locked model: `service_time_min = 10 + 2 × distinct_in_truck_zones_touched`. Hy
 
 **Ask the mentor anyway** (3 min) to calibrate the constants: *"Estamos modelando el tiempo por parada como 10 minutos base + 2 minutos por zona distinta del camión a la que tiene que acceder. ¿Coincide con tu intuición? ¿Cuánto tarda Fran de media en una parada hoy?"*
 
-### 🔴 MQ-D-11 — How does the warehouse currently load the truck? — STILL OPEN, ask mentor
+### ✅ MQ-D-11 — How does the warehouse currently load the truck? — Resolved 2026-05-09
 
-Decision 2026-05-09: pitch leads with "Descarga always blank, free intervention slot". This still needs mentor confirmation — it's the heart of the pitch.
-
-**Ask**: *"En la práctica, ¿cómo decide el preparador qué pallet va dónde dentro del camión? ¿Existe alguna convención (los retornables atrás, las bebidas frías cerca de la puerta) o es totalmente libre? ¿La columna `Descarga` de la Hoja Carga la rellena alguien manualmente alguna vez?"*
-
-**If mentor says some preparers fill it informally**: soften pitch wording from "free slot" to "automation of an existing manual practice" — both work, just different framing.
+**Confirmed**: the `Descarga` column is **always blank** today. Pitch leads with "free intervention slot, zero-friction adoption". The `Lote` column is also always blank — ignore it for v1 (we don't read or write it).
 
 ### 🟢 MQ-D-12 — More demo data
 

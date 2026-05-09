@@ -301,8 +301,8 @@ Each section has the same column header: `Ubicación | Nº Prod. | Descripción 
 1. **`Carga lleno`** — full outbound, with assigned warehouse location.
    - Sorted by `Ubicación` ascending (e.g. `A0DISTRIDA`, `AA02A1`, …, `ZCG`).
    - `Unidad`: `Caja`, `Barril`, `Tubo`, `Unidad`, `Pack`, `Botella`.
-   - `Lote`: usually empty.
-   - **`Descarga`: ALWAYS EMPTY in current paperwork.** This is our intervention slot.
+   - **`Lote`: ALWAYS EMPTY in current paperwork** (confirmed 2026-05-09). We don't read or write this column; pass through unchanged.
+   - **`Descarga`: ALWAYS EMPTY in current paperwork** (confirmed 2026-05-09). This is our intervention slot — Smart Hoja Carga populates it with the truck pallet target.
    - Section ends with `Total Cantidad: <n>` row.
 
 2. **`Carga lleno sin ubicación`** — outbound items without a warehouse slot (typically third-party / direct-cross-dock items).
@@ -644,7 +644,7 @@ Most of the table below was resolved in the user-led decision session on 2026-05
 | A-01 | ✅ Locked 2026-05-09 | **Truck grids**: furgoneta 1×3, 6-pallet truck 2×3, 8-pallet truck 2×4. EUR 80×120 cm pallets. **Vertical stack ≤ 1.80 m** per slot. Barrels (BRL30/BRL20/TB8) occupy one slot each and stack vertically up to the 1.80 m limit. |
 | A-02 | ⚠️ To confirm with mentor | Side-curtain trucks allow access to any pallet from either lateral side. |
 | A-03 | ✅ Resolved 2026-05-09 | Route codes in `Detalle entrega` are standard `DR…`, joinable directly with `ZONAS.RutReal` and Hoja Carga. The single `DA…` legacy route is filtered out during ETL. |
-| A-04 | ⚠️ To confirm with mentor | Stop order on the source Hoja Ruta IS the actual delivery order Fran took on 2026-05-08. (Decision 2026-05-09: trust it for v1; revisit if mentor disagrees.) |
+| A-04 | ✅ Confirmed 2026-05-09 | Stop order on the source Hoja Ruta IS the actual delivery order. Drivers cannot re-sequence on the road because the truck load is built specifically for the printed order. The route order itself already reflects driver local experience baked in by the planner. |
 | A-05 | ✅ Resolved 2026-05-09 | `Horarios Entrega` is **complete** — every customer × weekday is explicit. `K = L = 00:00:00` means closed that day. No "default window" needed. |
 | A-06 | ✅ Locked 2026-05-09 | Service time per stop = `10 + 2 × distinct_in_truck_zones_touched` minutes. Drives the unload-time KPI delta. |
 | A-07 | ✅ Locked 2026-05-09 | Per-class return rates: BRL = 100%, RET = 80%, SR = 0%, other = 60%. |
@@ -661,6 +661,8 @@ Most of the table below was resolved in the user-led decision session on 2026-05
 | A-18 | ✅ Locked 2026-05-09 | **PDF rendering = ReportLab** (pure Python). |
 | A-19 | ✅ Locked 2026-05-09 | **Persistence = parquet files committed to the repo**. ETL runs on demand to regenerate. |
 | A-20 | ✅ Locked 2026-05-09 | **Demo runs on localhost** (no live URL for v1). |
+| A-21 | ✅ Confirmed 2026-05-09 | The `Descarga` column on Hoja Carga is **always blank** today. Our intervention populates it; zero-friction adoption. The `Lote` column is also always blank — we leave it untouched in our output. |
+| A-22 | ✅ Locked 2026-05-09 | **Pitch narrative**: today, route order and truck load are *implicitly* coupled (the load is arranged around the order, and the order reflects driver experience). Smart Truck makes that coupling explicit, jointly optimised, and reproducible — instead of relying on tribal knowledge per route, per driver. |
 
 ---
 
