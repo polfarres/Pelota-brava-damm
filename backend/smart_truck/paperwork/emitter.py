@@ -92,17 +92,63 @@ _CARGA_SECTION_LABELS = {
 }
 
 
-def _build_descarga_lookup(plan: Plan | None) -> dict[str, str]:
-    """``sku → slot_id`` mapping for outbound (non-envase) plan slots."""
+def _build_descarga_breakdown(
+    plan: Plan | None,
+) -> dict[str, list[tuple[str, float]]]:
+    """``sku → [(slot_id, qty_in_that_slot), …]`` for outbound (non-envase) slots.
+
+    Walks every slot's `contents`, sums quantities per ``(sku, slot_id)``,
+    and returns the breakdown sorted by slot id for stable rendering.
+    Used by the source-row splitter so that an aggregate Hoja Carga row
+    whose SKU is spread across multiple Plan slots gets emitted as one
+    PDF row per slot, with the source quantity distributed
+    proportionally — correctly reflecting the v2 packer's per-pallet
+    capacity (≤60 CE, A-31).
+    """
     if plan is None:
         return {}
-    lookup: dict[str, str] = {}
+    breakdown: dict[str, dict[str, float]] = {}
     for slot in plan.slot_assignments:
         if slot.is_envase_zone:
             continue
         for line in slot.contents:
-            lookup.setdefault(line.sku, slot.slot_id)
-    return lookup
+            per_slot = breakdown.setdefault(line.sku, {})
+            per_slot[slot.slot_id] = per_slot.get(slot.slot_id, 0.0) + line.quantity
+    return {
+        sku: sorted(per_slot.items(), key=lambda kv: kv[0])
+        for sku, per_slot in breakdown.items()
+    }
+
+
+def _split_qty_by_breakdown(
+    source_qty: float,
+    breakdown: list[tuple[str, float]],
+) -> list[tuple[str, float]]:
+    """Distribute ``source_qty`` across ``breakdown`` slots in proportion
+    to the breakdown weights. Returns ``[(slot_id, qty), …]`` whose
+    quantities sum to ``source_qty`` (last row absorbs rounding
+    remainder).
+    """
+    total = sum(q for _, q in breakdown)
+    if total <= 0:
+        return [(breakdown[0][0], source_qty)] if breakdown else []
+    out: list[tuple[str, float]] = []
+    accumulated = 0.0
+    for i, (sid, q) in enumerate(breakdown):
+        if i == len(breakdown) - 1:
+            # Last row absorbs the rounding remainder so the column total
+            # exactly matches the source row's printed quantity.
+            out.append((sid, max(0.0, source_qty - accumulated)))
+        else:
+            share = source_qty * (q / total)
+            # Round to one decimal place — Hoja Carga uses integer
+            # quantities for cases / units / barrels, so any fractional
+            # display would look odd. We keep the math precise but
+            # render integers.
+            share = round(share)
+            out.append((sid, share))
+            accumulated += share
+    return out
 
 
 def _envase_slot_id(plan: Plan | None) -> str | None:
@@ -149,7 +195,7 @@ def emit_smart_hoja_carga(
     output_path: Path,
 ) -> Path:
     """Render a Smart Hoja Carga PDF and return its path."""
-    descarga_lookup = _build_descarga_lookup(plan)
+    descarga_breakdown = _build_descarga_breakdown(plan)
     envase_slot = _envase_slot_id(plan)
     slot_to_seq = _slot_to_stop_sequence(plan)
 
@@ -166,7 +212,7 @@ def emit_smart_hoja_carga(
             _carga_section_table(
                 section_lines,
                 section=section,
-                descarga_lookup=descarga_lookup,
+                descarga_breakdown=descarga_breakdown,
                 envase_slot=envase_slot,
                 slot_to_seq=slot_to_seq,
             )
@@ -174,6 +220,13 @@ def emit_smart_hoja_carga(
 
     elements.append(Spacer(0, 4 * mm))
     elements.append(_carga_totals_table(source))
+
+    # Per-slot capacity summary footer (A-31 invariant visible at a glance).
+    if plan is not None:
+        per_slot_para = _per_slot_summary_paragraph(plan)
+        if per_slot_para is not None:
+            elements.append(Spacer(0, 3 * mm))
+            elements.append(per_slot_para)
 
     doc = SimpleDocTemplate(
         str(output_path),
@@ -186,6 +239,31 @@ def emit_smart_hoja_carga(
     )
     doc.build(elements)
     return output_path
+
+
+def _per_slot_summary_paragraph(plan: Plan) -> Paragraph | None:
+    """Footer line: ``Per slot · P1 58 / 60 CE · P2 42 / 60 CE · …`` so
+    the ≤60 CE per-pallet invariant (A-31) is visible to the reader.
+    """
+    chunks: list[str] = []
+    for slot in plan.slot_assignments:
+        if not slot.contents and not slot.stack:
+            continue
+        ce_used = slot.ce_used
+        if ce_used == 0 and slot.contents:
+            ce_used = sum(line.ce for line in slot.contents)
+        type_tag = slot.pallet_type or ""
+        chunks.append(
+            f"<b>{slot.slot_id}</b> "
+            f"{ce_used:.0f} / {slot.ce_capacity:.0f} CE"
+            f"{f' · {type_tag.lower()}' if type_tag else ''}"
+        )
+    if not chunks:
+        return None
+    return Paragraph(
+        "Per slot · " + " &nbsp;|&nbsp; ".join(chunks),
+        _meta_style,
+    )
 
 
 def _group_lines_by_section(
@@ -217,7 +295,7 @@ def _carga_section_table(
     lines: list[HojaCargaLine],
     *,
     section: str,
-    descarga_lookup: dict[str, str],
+    descarga_breakdown: dict[str, list[tuple[str, float]]],
     envase_slot: str | None,
     slot_to_seq: dict[str, int],
 ) -> Table:
@@ -230,50 +308,68 @@ def _carga_section_table(
     rows: list[list] = [headers]
     row_colours: list[tuple[int, colors.Color]] = []
 
-    for i, ln in enumerate(lines, start=1):
-        descarga = ""
-        if section == "envases":
-            descarga = envase_slot or ""
-        elif section in ("lleno", "lleno_sin_ubic"):
-            descarga = descarga_lookup.get(ln.sku, "")
-        # Retorno is supplier-side; leave Descarga blank.
-
+    def _row_for(ln: HojaCargaLine, qty: float, descarga: str) -> list:
         if section == "retorno":
-            rows.append([
+            return [
                 ln.ubicacion or "",
                 ln.sku,
                 ln.description,
                 ln.estado or "",
-                f"{ln.quantity:g}",
+                f"{qty:g}",
                 ln.unit,
                 descarga,
-            ])
-        elif section == "envases":
-            rows.append([
+            ]
+        if section == "envases":
+            return [
                 ln.ubicacion or "",
                 ln.sku,
                 ln.description,
-                f"{ln.quantity:g}",
+                f"{qty:g}",
                 ln.unit,
                 descarga,
-            ])
-        else:
-            rows.append([
-                ln.ubicacion or "",
-                ln.sku,
-                ln.description,
-                f"{ln.quantity:g}",
-                ln.unit,
-                ln.lote or "",
-                descarga,
-            ])
+            ]
+        return [
+            ln.ubicacion or "",
+            ln.sku,
+            ln.description,
+            f"{qty:g}",
+            ln.unit,
+            ln.lote or "",
+            descarga,
+        ]
 
-        # Cluster colour by destination stop.
-        if section in ("lleno", "lleno_sin_ubic") and descarga:
-            seq = slot_to_seq.get(descarga)
-            colour = _customer_cluster_color(seq)
-            if colour:
-                row_colours.append((i, colour))
+    for ln in lines:
+        # Split a source line across multiple slots when its SKU is in
+        # several plan slots (the v2 packer's typical case for popular
+        # SKUs that go to many customers). Each split row carries the
+        # same Ubicación/SKU/Description/Unit; only Cantidad and
+        # Descarga differ. The picker walks to the same warehouse bay
+        # once and drops the picked product into the matching truck
+        # slots in sequence.
+        if section in ("lleno", "lleno_sin_ubic"):
+            breakdown = descarga_breakdown.get(ln.sku, [])
+            if not breakdown:
+                rows.append(_row_for(ln, ln.quantity, ""))
+                continue
+            split = _split_qty_by_breakdown(ln.quantity, breakdown)
+            for slot_id, qty in split:
+                if qty <= 0:
+                    continue
+                rows.append(_row_for(ln, qty, slot_id))
+                # Cluster colour by destination stop for the Descarga cell.
+                seq = slot_to_seq.get(slot_id)
+                colour = _customer_cluster_color(seq)
+                if colour:
+                    row_colours.append((len(rows) - 1, colour))
+            continue
+
+        if section == "envases":
+            descarga = envase_slot or ""
+            rows.append(_row_for(ln, ln.quantity, descarga))
+            continue
+
+        # Retorno is supplier-side; Descarga stays blank.
+        rows.append(_row_for(ln, ln.quantity, ""))
 
     rows.append([
         "Total Cantidad:",

@@ -1,12 +1,34 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { MOCK_PLAN, CLUSTER_COLORS } from '@/lib/mocks';
+import { getPlan } from '@/lib/api';
+import type { Plan } from '@/lib/types';
+
+const RUN_ID = 'DR0027-2026-05-08';
+
+function formatEta(eta: string): string {
+  if (/^\d{2}:\d{2}/.test(eta)) return eta.slice(0, 5);
+  const d = new Date(eta);
+  return isNaN(d.getTime())
+    ? eta
+    : d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
 
 export default function DriverPage() {
-  const plan = MOCK_PLAN;
-  // Hard-code data from stop #3 (BAR LA PLAÇA, CALLDETENES) — a representative real DR0027 stop.
-  const stop = plan.stops[2];
-  const colour = CLUSTER_COLORS[stop.customer_id];
+  const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
+  useEffect(() => {
+    let cancelled = false;
+    getPlan(RUN_ID)
+      .then((p) => !cancelled && setPlan(p))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // First stop of the optimised plan.
+  const stop = plan.stops[0] ?? MOCK_PLAN.stops[0];
+  const colour = CLUSTER_COLORS[stop.customer_id] ?? '#7e57c2';
   const totalEnvasesUsed = 38;
   const totalEnvasesCapacity = 60;
   const envasesPct = (totalEnvasesUsed / totalEnvasesCapacity) * 100;
@@ -24,36 +46,39 @@ export default function DriverPage() {
           <div className="px-4 py-3 text-white" style={{ backgroundColor: colour }}>
             <div className="text-xs uppercase opacity-80">Parada {stop.sequence} de {plan.stops.length}</div>
             <div className="text-xl font-bold mt-1">{stop.customer_name}</div>
-            <div className="text-sm opacity-90">{stop.address}, {stop.city}</div>
+            <div className="text-sm opacity-90">{stop.address}{stop.city ? `, ${stop.city}` : ''}</div>
           </div>
           <div className="px-4 py-3 space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500">ETA</span>
               <span className="font-bold">
-                {new Date(stop.eta!).toLocaleTimeString('es-ES', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
+                {stop.eta ? formatEta(stop.eta) : '—'}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Ventana</span>
-              <span className="font-mono text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                ✓ {stop.time_window_start}–{stop.time_window_end}
-              </span>
+              {stop.time_window_start ? (
+                <span className="font-mono text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                  ✓ {stop.time_window_start}–{stop.time_window_end}
+                </span>
+              ) : (
+                <span className="font-mono text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
+                  Obert
+                </span>
+              )}
             </div>
             {stop.payment_condition === 'CONTADO' && (
               <div className="bg-yellow-100 border border-yellow-300 rounded p-2 text-center font-bold text-yellow-900">
-                💰 CONTADO · cobrar {stop.cash_total.toFixed(2)} €
+                💰 CONTADO · cobrar {(stop.cash_total ?? stop.proforma_total).toFixed(2)} €
               </div>
             )}
             <div className="bg-damm-red text-white rounded-lg p-3 text-center">
               <div className="text-xs uppercase opacity-80">Acción</div>
               <div className="text-lg font-bold">
-                Abrir cortina <span className="capitalize">{stop.curtain_side}</span>
+                Abrir cortina <span className="capitalize">{stop.curtain_side ?? '—'}</span>
               </div>
               <div className="text-2xl font-bold mt-1">
-                Pallet {stop.pallet_slots?.join(', ')}
+                Pallet {stop.pallet_slots?.join(', ') ?? '—'}
               </div>
             </div>
           </div>

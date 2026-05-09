@@ -3,6 +3,15 @@
 import type { StopPlan } from '@/lib/types';
 import { CLUSTER_COLORS } from '@/lib/mocks';
 
+function formatEta(eta: string): string {
+  // Backend serialises `time` as "HH:MM:SS"; an ISO datetime also works.
+  if (/^\d{2}:\d{2}/.test(eta)) return eta.slice(0, 5);
+  const d = new Date(eta);
+  return isNaN(d.getTime())
+    ? eta
+    : d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
 interface Props {
   stops: StopPlan[];
   selectedSeq: number | null;
@@ -35,20 +44,24 @@ export default function StopList({ stops, selectedSeq, onSelect }: Props) {
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-sm truncate">{s.customer_name}</div>
                 <div className="text-xs text-gray-600 truncate">
-                  {s.address}, {s.city}
+                  {s.address}{s.city ? `, ${s.city}` : ''}
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-xs">
                   {s.eta && (
                     <span className="text-gray-700">
-                      {new Date(s.eta).toLocaleTimeString('es-ES', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {formatEta(s.eta)}
                     </span>
                   )}
-                  {s.time_window_start && (
+                  {s.time_window_start ? (
                     <span className="text-gray-500">
                       [{s.time_window_start}–{s.time_window_end}]
+                    </span>
+                  ) : (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500"
+                      title="Sense finestra horària a Horarios Entrega.XLSX"
+                    >
+                      Obert
                     </span>
                   )}
                   <span

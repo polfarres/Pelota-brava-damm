@@ -45,20 +45,21 @@ export interface StopPlan {
   customer_id: number;
   customer_name: string;
   address: string;
-  city: string;
+  city?: string;
   lat: number | null;
   lon: number | null;
   payment_condition: 'CONTADO' | 'CREDITO';
-  albaran_id: number;
   proforma_total: number;
-  cash_total: number;
-  // Optimised fields (may be empty for baseline-only ETAs):
-  eta?: string; // ISO datetime
-  time_window_start?: string; // HH:mm
-  time_window_end?: string;
-  pallet_slots?: string[]; // which pallets serve this stop
-  curtain_side?: 'left' | 'right' | 'rear' | 'both';
   delivery_lines: DeliveryLine[];
+  // Optional / derived fields (some only present on baseline, some only on
+  // optimised, some not yet surfaced by backend):
+  albaran_id?: number;
+  cash_total?: number;
+  eta?: string;
+  time_window_start?: string;
+  time_window_end?: string;
+  pallet_slots?: string[];
+  curtain_side?: 'left' | 'right' | 'rear' | 'both';
   pickup_envases?: DeliveryLine[];
   explanation?: string;
 }
@@ -85,13 +86,14 @@ export interface KpiDelta {
 export interface PlanBase {
   ruta: string;
   fecha: string; // ISO date
-  carga_id: number;
   vehicle: VehicleProfile;
-  driver_id: number;
-  driver_name: string;
   stops: StopPlan[];
   pallet_assignments: PalletAssignment[];
-  totals: {
+  // Backend-missing fields surfaced via mocks/fallbacks today:
+  carga_id?: number;
+  driver_id?: number;
+  driver_name?: string;
+  totals?: {
     units: number;
     weight_kg: number;
     volume_l: number;
@@ -100,11 +102,11 @@ export interface PlanBase {
 
 export interface BaselinePlan extends PlanBase {
   kind: 'baseline';
-  kpi: Kpi;
+  kpi?: Kpi;
 }
 
 export interface Plan extends PlanBase {
   kind: 'optimised';
   kpi_delta: KpiDelta;
-  generated_at: string;
+  generated_at?: string;
 }

@@ -32,6 +32,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .baseline import RECURSOS_DIR, BaselineInputs, reconstruct_baseline
+from .kpi import compute_kpis
+from .optimize import pipeline
 from .paperwork.emitter import emit_smart_hoja_carga, emit_smart_hoja_ruta
 from .paperwork.parser import parse_hoja_carga, parse_hoja_ruta
 
@@ -44,6 +46,49 @@ _KNOWN_CARGAS: dict[str, tuple[Path, Path]] = {
         RECURSOS_DIR / "Hoja Ruta.pdf",
     ),
 }
+
+# Process-lifetime cache: run_id → (Plan, KpiSummary). Populated lazily
+# on first GET or recomputed on POST. Keyed by ``{ruta}-{fecha}``.
+_PLAN_CACHE: dict[str, tuple[Any, Any]] = {}
+
+
+def _parse_run_id(run_id: str) -> tuple[str, str]:
+    """Split ``DR0027-2026-05-08`` into ``("DR0027", "2026-05-08")``.
+
+    The fecha is always the last 10 characters (``YYYY-MM-DD``); ruta is
+    everything before the trailing ``-{fecha}``. This lets us support
+    rutas like ``DR0027`` (which contain no hyphen) cleanly.
+    """
+    if len(run_id) < 12 or run_id[-11] != "-":
+        raise HTTPException(
+            status_code=400,
+            detail=f"run_id must be ``{{ruta}}-YYYY-MM-DD``, got {run_id!r}",
+        )
+    ruta = run_id[:-11]
+    fecha = run_id[-10:]
+    return ruta, fecha
+
+
+def _get_or_compute_plan(ruta: str, fecha_iso: str, *, force: bool = False):
+    """Return the cached Plan + KpiSummary, computing on first miss."""
+    key = f"{ruta}-{fecha_iso}"
+    if force or key not in _PLAN_CACHE:
+        if key not in _KNOWN_CARGAS:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"unknown run_id {key!r}. Today only "
+                    f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
+                ),
+            )
+        plan_obj = pipeline.plan(
+            ruta, date.fromisoformat(fecha_iso), prefer_osrm=False
+        )
+        carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
+        baseline = reconstruct_baseline(carga_pdf, ruta_pdf)
+        kpis = compute_kpis(baseline, plan_obj, prefer_osrm=False)
+        _PLAN_CACHE[key] = (plan_obj, kpis)
+    return _PLAN_CACHE[key]
 
 app = FastAPI(title="Smart Truck", version="0.1.0")
 
@@ -138,48 +183,43 @@ def get_customer(customer_id: int) -> dict[str, Any]:
 class PlanRequest(BaseModel):
     ruta: str
     fecha: str  # ISO YYYY-MM-DD
+    force: bool = False
 
 
 @app.post("/plan")
-def post_plan(_req: PlanRequest) -> dict[str, Any]:
+def post_plan(req: PlanRequest) -> dict[str, Any]:
     """Run the joint optimiser and return a Plan + KPI summary.
 
-    Stub today: returns 501 until Track A's optimiser pipeline is in.
-    Frontend (Track C) can mock this with a hand-built Plan that matches
-    ``smart_truck.models.Plan``.
+    Body: ``{ruta, fecha, force?: bool}``. ``force=True`` recomputes;
+    otherwise the cached Plan (if any) is returned.
     """
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            "Joint route + load optimisation not yet wired. "
-            "Track A: implement smart_truck.optimize.pipeline.plan(...) "
-            "and route this endpoint to it."
-        ),
-    )
+    plan_obj, kpis = _get_or_compute_plan(req.ruta, req.fecha, force=req.force)
+    return {
+        "run_id": f"{req.ruta}-{req.fecha}",
+        "plan": _jsonable(plan_obj),
+        "kpi": _jsonable(kpis),
+    }
 
 
 @app.get("/plan/{run_id}")
 def get_plan(run_id: str) -> dict[str, Any]:
-    """Fetch a previously-computed :class:`Plan` as JSON.
+    """Fetch a previously-computed :class:`Plan` (+ KPI summary) as JSON.
 
-    Response shape mirrors :class:`smart_truck.models.Plan`: ``ruta``,
-    ``fecha``, ``vehicle_profile``, ``stops`` (each a ``StopPlan``),
-    ``slot_assignments`` (each a ``SlotAssignment``), and
-    ``explanations``.
+    Response shape: ``{run_id, plan, kpi}`` where ``plan`` mirrors
+    :class:`smart_truck.models.Plan` and ``kpi`` mirrors
+    :class:`smart_truck.kpi.KpiSummary`.
 
-    Stub today: 501 until Track A wires the optimiser + Plan store.
-    Track C can mock against ``smart_truck.models.Plan``; the real
-    endpoint will route through whatever Plan store Track A
-    introduces under ``run_id`` keys of the form ``{ruta}-{fecha}``
-    (same convention as the PDF endpoints).
+    The Plan is computed lazily on first request and cached for the
+    process lifetime. Today only ``DR0027-2026-05-08`` is wired (the
+    only carga we have source PDFs for).
     """
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            f"Plan {run_id!r} not yet retrievable. Track A: register "
-            "the Plan store and route this endpoint to it."
-        ),
-    )
+    ruta, fecha = _parse_run_id(run_id)
+    plan_obj, kpis = _get_or_compute_plan(ruta, fecha)
+    return {
+        "run_id": run_id,
+        "plan": _jsonable(plan_obj),
+        "kpi": _jsonable(kpis),
+    }
 
 
 def _emit_via_tempfile(emitter, source, plan) -> bytes:
@@ -197,12 +237,9 @@ def _emit_via_tempfile(emitter, source, plan) -> bytes:
 def get_smart_hoja_carga(run_id: str) -> Response:
     """Smart Hoja Carga PDF (FR-010).
 
-    Until Track A's Plan store lands we operate in pass-through mode: a
-    known ``run_id`` resolves to source PDFs and we emit a Smart Hoja
-    Carga where the layout matches DDIDGP but the ``Descarga`` column
-    stays blank (because there's no Plan to fill it from yet).
-
-    ``run_id`` format: ``{ruta}-{fecha}`` (ISO date), e.g.
+    Resolves the run_id to its source PDF + cached Plan, then emits a
+    Smart Hoja Carga whose ``Descarga`` column is populated from the
+    optimiser. ``run_id`` format: ``{ruta}-{fecha}``, e.g.
     ``DR0027-2026-05-08``.
     """
     if run_id not in _KNOWN_CARGAS:
@@ -213,16 +250,18 @@ def get_smart_hoja_carga(run_id: str) -> Response:
                 f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
             ),
         )
+    ruta, fecha = _parse_run_id(run_id)
+    plan_obj, _ = _get_or_compute_plan(ruta, fecha)
     carga_pdf, _ = _KNOWN_CARGAS[run_id]
     source = parse_hoja_carga(carga_pdf)
-    pdf = _emit_via_tempfile(emit_smart_hoja_carga, source, plan=None)
+    pdf = _emit_via_tempfile(emit_smart_hoja_carga, source, plan=plan_obj)
     return Response(content=pdf, media_type="application/pdf")
 
 
 @app.get("/plan/{run_id}/hoja-ruta.pdf")
 def get_smart_hoja_ruta(run_id: str) -> Response:
-    """Smart Hoja Ruta PDF (FR-011). Pass-through mode like
-    ``hoja-carga.pdf`` until the optimiser is in."""
+    """Smart Hoja Ruta PDF (FR-011). Reorders rows to the optimised
+    sequence and annotates ETAs from the cached Plan."""
     if run_id not in _KNOWN_CARGAS:
         raise HTTPException(
             status_code=404,
@@ -231,7 +270,9 @@ def get_smart_hoja_ruta(run_id: str) -> Response:
                 f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
             ),
         )
+    ruta, fecha = _parse_run_id(run_id)
+    plan_obj, _ = _get_or_compute_plan(ruta, fecha)
     _, ruta_pdf = _KNOWN_CARGAS[run_id]
     source = parse_hoja_ruta(ruta_pdf)
-    pdf = _emit_via_tempfile(emit_smart_hoja_ruta, source, plan=None)
+    pdf = _emit_via_tempfile(emit_smart_hoja_ruta, source, plan=plan_obj)
     return Response(content=pdf, media_type="application/pdf")

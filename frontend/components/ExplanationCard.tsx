@@ -25,7 +25,7 @@ export default function ExplanationCard({ stop }: Props) {
         <h3 className="font-bold">{stop.customer_name}</h3>
       </div>
       <div className="text-xs text-gray-600 mb-3">
-        {stop.address}, {stop.city}
+        {stop.address}{stop.city ? `, ${stop.city}` : ''}
       </div>
 
       {stop.pallet_slots && stop.pallet_slots.length > 0 && (

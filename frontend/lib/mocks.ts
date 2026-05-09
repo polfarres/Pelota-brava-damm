@@ -339,7 +339,7 @@ export const MOCK_PLAN: Plan = {
   totals: TOTALS,
   generated_at: new Date().toISOString(),
   kpi_delta: {
-    baseline: MOCK_BASELINE.kpi,
+    baseline: MOCK_BASELINE.kpi!,
     optimised: {
       total_km: 138.2,
       total_minutes: 348,

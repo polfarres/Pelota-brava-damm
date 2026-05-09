@@ -68,16 +68,52 @@ def test_customer_lookup_missing_id_404(client: TestClient) -> None:
     assert r.status_code in (404,)
 
 
-def test_post_plan_stub_returns_501(client: TestClient) -> None:
-    r = client.post("/plan", json={"ruta": "DR0027", "fecha": "2026-05-08"})
-    assert r.status_code == 501
-
-
-def test_get_plan_stub_returns_501(client: TestClient) -> None:
+@pytest.mark.skipif(
+    not (RECURSOS / "Hoja Carga.pdf").exists(),
+    reason="Sample PDFs not present.",
+)
+def test_get_plan_returns_plan_and_kpi(client: TestClient) -> None:
     r = client.get("/plan/DR0027-2026-05-08")
-    assert r.status_code == 501
+    assert r.status_code == 200, r.text
     body = r.json()
-    assert "Track A" in body["detail"]
+    assert body["run_id"] == "DR0027-2026-05-08"
+    plan = body["plan"]
+    assert plan["ruta"] == "DR0027"
+    assert plan["fecha"] == "2026-05-08"
+    assert len(plan["stops"]) > 0
+    assert len(plan["slot_assignments"]) > 0
+    # A-36: no envase zone in v2.
+    assert all(not sa["is_envase_zone"] for sa in plan["slot_assignments"])
+    kpi = body["kpi"]
+    assert "deltas" in kpi
+    assert {d["metric"] for d in kpi["deltas"]} >= {
+        "total_km",
+        "total_minutes",
+        "in_truck_searches",
+    }
+
+
+@pytest.mark.skipif(
+    not (RECURSOS / "Hoja Carga.pdf").exists(),
+    reason="Sample PDFs not present.",
+)
+def test_post_plan_returns_plan_and_kpi(client: TestClient) -> None:
+    r = client.post("/plan", json={"ruta": "DR0027", "fecha": "2026-05-08"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["run_id"] == "DR0027-2026-05-08"
+    assert body["plan"]["ruta"] == "DR0027"
+    assert "kpi" in body
+
+
+def test_get_plan_unknown_run_id_404(client: TestClient) -> None:
+    r = client.get("/plan/DR9999-2026-01-01")
+    assert r.status_code == 404
+
+
+def test_get_plan_malformed_run_id_400(client: TestClient) -> None:
+    r = client.get("/plan/not-a-run-id")
+    assert r.status_code in (400, 404)
 
 
 def test_smart_carga_pdf_unknown_run_id_404(client: TestClient) -> None:
@@ -94,12 +130,25 @@ def test_smart_ruta_pdf_unknown_run_id_404(client: TestClient) -> None:
     not (RECURSOS / "Hoja Carga.pdf").exists(),
     reason="Sample PDFs not present.",
 )
-def test_smart_carga_pdf_known_run_id_returns_pdf(client: TestClient) -> None:
+def test_smart_carga_pdf_known_run_id_descarga_populated(client: TestClient) -> None:
+    """The wired Smart Hoja Carga must have a populated Descarga column
+    (slot ids appear in the rendered text), not the pass-through blank."""
     r = client.get("/plan/DR0027-2026-05-08/hoja-carga.pdf")
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content[:5] == b"%PDF-"
     assert len(r.content) > 1000
+
+    import io
+    import pdfplumber
+
+    with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+        text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+
+    # At least one Pn slot id and the per-slot footer must appear.
+    import re
+    assert "Per slot" in text
+    assert re.search(r"\bP\d+\b", text), "no slot ids in rendered Smart Hoja Carga"
 
 
 @pytest.mark.skipif(

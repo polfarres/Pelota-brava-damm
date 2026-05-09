@@ -88,8 +88,8 @@ export default function PickListTable({ plan, mode }: Props) {
         <div>
           <div className="font-bold text-sm">HOJA DE CARGA · DDIDGP</div>
           <div>
-            Nº Carga {plan.carga_id} · Vehículo {plan.vehicle.license_plate} · Repartidor{' '}
-            {plan.driver_id} {plan.driver_name}
+            Nº Carga {plan.carga_id ?? '—'} · Vehículo {plan.vehicle.license_plate || '—'} · Repartidor{' '}
+            {plan.driver_id ?? ''} {plan.driver_name ?? ''}
           </div>
         </div>
         <div className="text-right">

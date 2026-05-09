@@ -5,26 +5,28 @@ import dynamic from 'next/dynamic';
 import StopList from '@/components/StopList';
 import KpiPanel from '@/components/KpiPanel';
 import ExplanationCard from '@/components/ExplanationCard';
-import { MOCK_BASELINE, MOCK_PLAN } from '@/lib/mocks';
-import { getBaseline } from '@/lib/api';
-import type { BaselinePlan } from '@/lib/types';
+import { MOCK_PLAN } from '@/lib/mocks';
+import { getPlan } from '@/lib/api';
+import type { Plan } from '@/lib/types';
+
+const RUN_ID = 'DR0027-2026-05-08';
 
 // Leaflet must not be SSR'd.
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
 export default function Dashboard() {
-  const [baseline, setBaseline] = useState<BaselinePlan>(MOCK_BASELINE);
+  const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
   const [selectedSeq, setSelectedSeq] = useState<number | null>(1);
   const [apiOk, setApiOk] = useState<'pending' | 'ok' | 'fallback'>('pending');
 
-  // Try to hydrate from real backend; fall back to mock cleanly.
   useEffect(() => {
     let cancelled = false;
-    getBaseline('DR0027', '2026-05-08')
-      .then((b) => {
+    getPlan(RUN_ID)
+      .then((p) => {
         if (!cancelled) {
-          setBaseline(b);
+          setPlan(p);
           setApiOk('ok');
+          setSelectedSeq(p.stops[0]?.sequence ?? 1);
         }
       })
       .catch(() => {
@@ -35,8 +37,6 @@ export default function Dashboard() {
     };
   }, []);
 
-  // The dashboard always shows the optimised stops on the map (FR-013).
-  const plan = MOCK_PLAN;
   const selectedStop = useMemo(
     () => plan.stops.find((s) => s.sequence === selectedSeq) ?? null,
     [plan.stops, selectedSeq],

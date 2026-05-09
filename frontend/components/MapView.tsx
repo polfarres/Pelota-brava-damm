@@ -113,7 +113,7 @@ export default function MapView({ stops, selectedSeq, onSelect }: Props) {
                 #{s.sequence} {s.customer_name}
               </strong>
               <br />
-              {s.address}, {s.city}
+              {s.address}{s.city ? `, ${s.city}` : ''}
               {s.eta && (
                 <>
                   <br />

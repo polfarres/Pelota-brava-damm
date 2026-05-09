@@ -194,7 +194,7 @@ export default function TruckTwin3D({ plan }: Props) {
             #{currentStop.sequence} {currentStop.customer_name}
           </div>
           <div className="text-xs text-gray-600">
-            {currentStop.address}, {currentStop.city}
+            {currentStop.address}{currentStop.city ? `, ${currentStop.city}` : ''}
           </div>
           {currentStop.pallet_slots && (
             <div className="mt-1 text-xs">

@@ -104,7 +104,9 @@ def test_ruta_passthrough_lists_18_albaranes(tmp_path: Path, parsed_ruta) -> Non
 def _toy_plan(parsed_carga, parsed_ruta) -> Plan:
     """Build a Plan that round-robins carga lines into 6 truck slots and
     reverses the stop order. Just enough fixture to exercise the
-    Descarga lookup and the row-reordering code path."""
+    Descarga lookup and the row-reordering code path. Honors A-31:
+    each slot is capped at 60 CE (lines beyond the cap are dropped from
+    the toy plan — the test only needs *some* coverage per slot)."""
     slots: list[SlotAssignment] = []
     by_id: dict[str, SlotAssignment] = {}
     outbound = [ln for ln in parsed_carga.lines if ln.section in ("lleno", "lleno_sin_ubic")]
@@ -116,13 +118,15 @@ def _toy_plan(parsed_carga, parsed_ruta) -> Plan:
             slot = SlotAssignment(slot_id=sid, is_envase_zone=False)
             slots.append(slot)
             by_id[sid] = slot
+        if sum(c.ce for c in slot.contents) + 1.0 > 60.0:
+            continue
         slot.contents.append(
             DeliveredLine(
                 sku=ln.sku,
                 description=ln.description,
                 quantity=ln.quantity,
                 unit=ln.unit,
-                ce=ln.quantity,
+                ce=1.0,
                 weight_kg=0.0,
                 source_ubicacion=ln.ubicacion,
             )
@@ -156,14 +160,108 @@ def _toy_plan(parsed_carga, parsed_ruta) -> Plan:
 def test_carga_with_plan_populates_descarga(
     tmp_path: Path, parsed_carga, parsed_ruta
 ) -> None:
+    """Smart Hoja Carga populates the Descarga column with slot ids
+    from every used pallet — not just one. Guards against the v1 bug
+    where ``setdefault(sku, slot_id)`` kept only the first slot per SKU
+    and made every row look like it went to P1."""
     plan = _toy_plan(parsed_carga, parsed_ruta)
     out = tmp_path / "carga_smart.pdf"
     emit_smart_hoja_carga(parsed_carga, plan=plan, output_path=out)
     text = _read_pdf_text(out)
-    # The toy plan creates slot ids P1..P6 + E1; at least one should appear
-    # next to a SKU-bearing row.
-    assert any(slot in text for slot in ("P1", "P2", "P3", "P4", "P5", "P6"))
+    # All six toy slots must appear in the rendered Descarga column.
+    for sid in ("P1", "P2", "P3", "P4", "P5", "P6"):
+        assert sid in text, f"slot {sid} missing from rendered Smart Hoja Carga"
     assert "E1" in text  # envase slot id
+
+
+def test_descarga_split_when_sku_spans_slots(tmp_path: Path) -> None:
+    """A source row whose SKU lives in two plan slots is rendered as
+    *two* rows in the PDF — same Ubicación / SKU / Description / Unit,
+    one per slot, with the source quantity distributed proportionally.
+    """
+    from smart_truck.paperwork.parser import (
+        HojaCarga,
+        HojaCargaLine,
+        HojaCargaTotals,
+    )
+    line = HojaCargaLine(
+        section="lleno",
+        ubicacion="AA09A1",
+        sku="SPLITME",
+        description="A SKU SPANNING TWO SLOTS",
+        quantity=100,
+        unit="Caja",
+        lote=None,
+        estado=None,
+        descarga=None,
+    )
+    source = HojaCarga(
+        nº_carga=1, nº_precarga="X", vehiculo="V", repartidor_id=1,
+        repartidor_name="X", nº_viaje=1, fecha=date(2026, 5, 8), ruta="DR0001",
+        lines=[line],
+        totals_entrega=HojaCargaTotals(cantidad=100, volumen=None, peso_kg=None),
+        totals_devolucion=HojaCargaTotals(cantidad=0, volumen=None, peso_kg=None),
+    )
+
+    plan = Plan(
+        ruta="DR0001",
+        fecha=date(2026, 5, 8),
+        vehicle_profile="truck_6p_sidecurtain",
+        stops=[],
+        slot_assignments=[
+            SlotAssignment(
+                slot_id="P1", is_envase_zone=False, pallet_type="CASE",
+                stop_sequences=[1],
+                contents=[DeliveredLine(
+                    sku="SPLITME", description="A SKU SPANNING TWO SLOTS",
+                    quantity=30, unit="Caja", ce=1.0, weight_kg=0.0,
+                    source_ubicacion="AA09A1",
+                )],
+                ce_used=30.0, ce_capacity=60.0,
+            ),
+            SlotAssignment(
+                slot_id="P3", is_envase_zone=False, pallet_type="CASE",
+                stop_sequences=[2],
+                contents=[DeliveredLine(
+                    sku="SPLITME", description="A SKU SPANNING TWO SLOTS",
+                    quantity=70, unit="Caja", ce=1.0, weight_kg=0.0,
+                    source_ubicacion="AA09A1",
+                )],
+                ce_used=70.0, ce_capacity=60.0,
+            ),
+        ],
+    )
+
+    out = tmp_path / "split.pdf"
+    emit_smart_hoja_carga(source, plan=plan, output_path=out)
+    text = _read_pdf_text(out)
+
+    # Both slot ids must appear next to the SKU.
+    assert "P1" in text and "P3" in text
+
+    # The source qty 100 should split into 30 (P1) + 70 (P3) — both
+    # appear as standalone tokens in the rendered table.
+    import re
+    qtys = [int(m.group(1)) for m in re.finditer(r"\bSPLITME\b.*?\b(\d+)\s+Caja", text)]
+    assert sorted(qtys) == [30, 70], f"expected [30, 70], got {qtys}"
+
+
+def test_per_slot_ce_never_exceeds_capacity_in_pdf(
+    tmp_path: Path, parsed_carga, parsed_ruta
+) -> None:
+    """The per-slot footer line must report a CE figure ≤ 60 for every
+    listed slot (A-31 invariant — visible in the printed sheet)."""
+    plan = _toy_plan(parsed_carga, parsed_ruta)
+    out = tmp_path / "footer.pdf"
+    emit_smart_hoja_carga(parsed_carga, plan=plan, output_path=out)
+    text = _read_pdf_text(out)
+    assert "Per slot" in text
+    import re
+    # Match patterns like "P1 59 / 60 CE" — capture the used number.
+    pairs = re.findall(r"\bP\d+\s+(\d+(?:\.\d+)?)\s*/\s*60\s*CE", text)
+    assert pairs, f"no per-slot CE figures parsed; PDF text was:\n{text[-400:]}"
+    for used in pairs:
+        assert float(used) <= 60.0 + 1e-6, f"slot reported {used} CE > 60 cap"
 
 
 def test_ruta_with_plan_reorders_to_plan_sequence(
