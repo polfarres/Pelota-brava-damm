@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MOCK_PLAN, CLUSTER_COLORS } from '@/lib/mocks';
+import { MOCK_PLAN } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
+import { colorForCustomer } from '@/lib/colors';
 import type { Plan } from '@/lib/types';
 import { formatEta } from '@/lib/time';
 
@@ -21,7 +22,7 @@ export default function DriverPage() {
   }, []);
   // First stop of the optimised plan.
   const stop = plan.stops[0] ?? MOCK_PLAN.stops[0];
-  const colour = CLUSTER_COLORS[stop.customer_id] ?? '#7e57c2';
+  const colour = colorForCustomer(stop.customer_id);
   const totalEnvasesUsed = 38;
   const totalEnvasesCapacity = 60;
   const envasesPct = (totalEnvasesUsed / totalEnvasesCapacity) * 100;

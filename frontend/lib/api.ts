@@ -255,11 +255,21 @@ function adaptPallet(sa: BackendSlotAssignment): PalletAssignment {
   const customer_ids = sa.stack.length
     ? Array.from(new Set(sa.stack.map((entry) => entry.customer_id)))
     : sa.stop_sequences;
+  const stack = sa.stack.map((entry) => ({
+    stop_sequence: entry.stop_sequence,
+    customer_id: entry.customer_id,
+    ce: entry.ce,
+    lines: entry.lines.map(adaptDeliveryLine),
+  }));
   return {
     slot_id: sa.slot_id,
     customer_ids,
     lines: sa.contents.map(adaptDeliveryLine),
     is_envase_zone: sa.is_envase_zone,
+    stack,
+    pallet_type: sa.pallet_type,
+    ce_used: sa.ce_used,
+    ce_capacity: sa.ce_capacity,
   };
 }
 

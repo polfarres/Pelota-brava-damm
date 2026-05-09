@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import type { StopPlan } from '@/lib/types';
-import { CLUSTER_COLORS, DEPOT } from '@/lib/mocks';
+import { DEPOT } from '@/lib/mocks';
+import { colorForCustomer } from '@/lib/colors';
 import { formatEta } from '@/lib/time';
 import { getRouteGeometry } from '@/lib/api';
 
@@ -138,7 +139,7 @@ export default function MapView({ stops, selectedSeq, onSelect, runId }: Props) 
       <Polyline positions={polyline} pathOptions={{ color: '#E30613', weight: 3, opacity: 0.7 }} />
       {stops.map((s) => {
         if (s.lat == null || s.lon == null) return null;
-        const colour = CLUSTER_COLORS[s.customer_id] || '#666';
+        const colour = colorForCustomer(s.customer_id);
         const isSelected = selectedSeq === s.sequence;
         const [latJ, lonJ] = jitterCoincidentMarker(stops, s);
         return (

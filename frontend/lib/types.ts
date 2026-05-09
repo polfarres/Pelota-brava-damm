@@ -22,11 +22,24 @@ export interface DeliveryLine {
   is_returnable: boolean;
 }
 
+export interface StackLayer {
+  stop_sequence: number;
+  customer_id: number;
+  ce: number;
+  lines: DeliveryLine[];
+}
+
 export interface PalletAssignment {
   slot_id: string; // e.g. "P1", "P2"
   customer_ids: number[];
   lines: DeliveryLine[];
   is_envase_zone: boolean;
+  // TOP→BOTTOM stack — first entry is the customer delivered first.
+  // Empty for v1-shape baseline plans; populated by v2 packer output.
+  stack?: StackLayer[];
+  pallet_type?: 'CASE' | 'BARREL' | null;
+  ce_used?: number;
+  ce_capacity?: number;
 }
 
 export interface VehicleProfile {

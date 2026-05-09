@@ -26,6 +26,7 @@ export default function RootLayout({
           <nav className="flex gap-4 text-sm ml-auto">
             <Link href="/" className="hover:text-damm-red">Tauler</Link>
             <Link href="/pick-list" className="hover:text-damm-red">Full de Càrrega</Link>
+            <Link href="/loading" className="hover:text-damm-red">Magatzem</Link>
             <Link href="/truck" className="hover:text-damm-red">Camió</Link>
             <Link href="/driver" className="hover:text-damm-red">Conductor</Link>
           </nav>

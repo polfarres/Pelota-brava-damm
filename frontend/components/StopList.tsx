@@ -1,7 +1,7 @@
 'use client';
 
 import type { StopPlan } from '@/lib/types';
-import { CLUSTER_COLORS } from '@/lib/mocks';
+import { colorForCustomer } from '@/lib/colors';
 import { formatEta } from '@/lib/time';
 
 interface Props {
@@ -14,7 +14,7 @@ export default function StopList({ stops, selectedSeq, onSelect }: Props) {
   return (
     <div className="flex flex-col gap-2 overflow-y-auto pr-1">
       {stops.map((s) => {
-        const colour = CLUSTER_COLORS[s.customer_id] || '#666';
+        const colour = colorForCustomer(s.customer_id);
         const selected = selectedSeq === s.sequence;
         return (
           <button

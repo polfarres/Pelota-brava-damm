@@ -1,7 +1,7 @@
 'use client';
 
 import type { Plan, BaselinePlan } from '@/lib/types';
-import { CLUSTER_COLORS } from '@/lib/mocks';
+import { colorForCustomer } from '@/lib/colors';
 
 interface Props {
   plan: Plan | BaselinePlan;
@@ -151,7 +151,7 @@ function Section({
         </thead>
         <tbody>
           {rows.map((r, i) => {
-            const colour = r.customer_id ? CLUSTER_COLORS[r.customer_id] : null;
+            const colour = r.customer_id ? colorForCustomer(r.customer_id) : null;
             return (
               <tr
                 key={i}

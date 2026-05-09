@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import TruckTwin3D from '@/components/TruckTwin3D';
-import { MOCK_PLAN, CLUSTER_COLORS } from '@/lib/mocks';
+import { MOCK_PLAN } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
+import { colorForCustomer } from '@/lib/colors';
 import type { Plan } from '@/lib/types';
 
 const RUN_ID = 'DR0027-2026-05-08';
@@ -37,7 +38,7 @@ export default function TruckPage() {
               <li key={s.sequence} className="flex items-center gap-2">
                 <span
                   className="inline-block w-3 h-3 rounded"
-                  style={{ backgroundColor: CLUSTER_COLORS[s.customer_id] }}
+                  style={{ backgroundColor: colorForCustomer(s.customer_id) }}
                 />
                 <span className="font-mono">#{s.sequence}</span>
                 <span>{s.customer_name}</span>
