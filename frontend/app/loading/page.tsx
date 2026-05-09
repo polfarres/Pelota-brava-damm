@@ -1,10 +1,22 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { MOCK_PLAN } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
 import { colorForCustomer } from '@/lib/colors';
-import type { PalletAssignment, Plan, StackLayer } from '@/lib/types';
+import type { Plan, StackLayer } from '@/lib/types';
+
+// react-three-fiber must not be SSR'd — Three.js needs the browser's
+// WebGL context. Same pattern we use for Leaflet.
+const TruckScene3D = dynamic(() => import('@/components/TruckScene3D'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full bg-gray-100 flex items-center justify-center text-gray-500 rounded-lg" style={{ height: 380 }}>
+      Carregant escena 3D…
+    </div>
+  ),
+});
 
 const RUN_ID = 'DR0027-2026-05-08';
 
@@ -34,12 +46,43 @@ interface LoadStep {
   slotId: string;
   layerIndex: number;        // 0 = bottom of pallet (first to load)
   totalLayers: number;
-  customer_id: number;
+  customer_id: number | null;  // null = whole-column staple step
   customer_name: string;
-  stop_sequence: number;
+  stop_sequence: number | null;
   isStapleColumn: boolean;
   lines: { ubicacion: string | null; sku: string; description: string; quantity: number; unit: string }[];
   totalCe: number;
+}
+
+const STAPLE_SKUS = new Set(['CJ13', 'ED13']);
+
+function isStaplePallet(pa: { stack?: StackLayer[]; lines: { sku: string }[] }): boolean {
+  const skus = new Set((pa.lines ?? []).map((l) => l.sku));
+  if (skus.size === 0 || skus.size > 2) return false;
+  // True staple = column dedicated to Tier-1 SKUs across many stops.
+  return [...skus].every((s) => STAPLE_SKUS.has(s));
+}
+
+function aggregateLinesBySku(
+  lines: { ubicacion: string | null; sku: string; description: string; quantity: number; unit: string }[],
+): LoadStep['lines'] {
+  const byKey = new Map<string, LoadStep['lines'][number]>();
+  for (const l of lines) {
+    const key = `${l.ubicacion ?? ''}::${l.sku}::${l.unit}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.quantity += l.quantity;
+    } else {
+      byKey.set(key, { ...l });
+    }
+  }
+  // Round and drop near-zero rows. The carga aggregate distributes
+  // quantities by proforma proportion which can produce sub-unit
+  // fractions per layer; the picker only ever picks integer cases.
+  return [...byKey.values()]
+    .map((l) => ({ ...l, quantity: Math.round(l.quantity) }))
+    .filter((l) => l.quantity > 0)
+    .sort((a, b) => (a.ubicacion ?? '').localeCompare(b.ubicacion ?? ''));
 }
 
 function buildLoadingSteps(plan: Plan): LoadStep[] {
@@ -57,17 +100,35 @@ function buildLoadingSteps(plan: Plan): LoadStep[] {
     const stack: StackLayer[] = pa.stack ?? [];
     if (stack.length === 0) continue;
 
-    const isStaple = pa.customer_ids.length >= 5;
-    // Stack is TOP→BOTTOM in the plan. To load bottom-first we walk it
-    // in reverse: stack[N-1] is the floor of the pallet.
+    if (isStaplePallet(pa)) {
+      // ONE summary step per staple column — the picker brings the whole
+      // SKU as a single warehouse wave, no layering matters.
+      const totalCe = pa.ce_used ?? stack.reduce((s, l) => s + l.ce, 0);
+      const allLines = stack.flatMap((l) => l.lines);
+      const aggregated = aggregateLinesBySku(allLines);
+      if (aggregated.length === 0) continue;
+      steps.push({
+        slotId,
+        layerIndex: 0,
+        totalLayers: 1,
+        customer_id: null,
+        customer_name: '',
+        stop_sequence: null,
+        isStapleColumn: true,
+        lines: aggregated,
+        totalCe,
+      });
+      continue;
+    }
+
+    // LIFO pallet: stack is TOP→BOTTOM. Load bottom-first so we walk in
+    // reverse: stack[N-1] is the pallet floor (last-delivered customer).
     for (let i = stack.length - 1; i >= 0; i--) {
       const layer = stack[i];
       const layerIndex = stack.length - 1 - i;  // 0 = bottom
       const customer = customerNameById.get(layer.customer_id) ?? `client #${layer.customer_id}`;
-      // Sort lines by Ubicació so the picker walks the warehouse in lex order.
-      const sortedLines = [...layer.lines].sort((a, b) =>
-        (a.ubicacion ?? '').localeCompare(b.ubicacion ?? ''),
-      );
+      const aggregated = aggregateLinesBySku(layer.lines);
+      if (aggregated.length === 0) continue;
       steps.push({
         slotId,
         layerIndex,
@@ -75,8 +136,8 @@ function buildLoadingSteps(plan: Plan): LoadStep[] {
         customer_id: layer.customer_id,
         customer_name: customer,
         stop_sequence: layer.stop_sequence,
-        isStapleColumn: isStaple,
-        lines: sortedLines,
+        isStapleColumn: false,
+        lines: aggregated,
         totalCe: layer.ce,
       });
     }
@@ -106,12 +167,20 @@ export default function LoadingPage() {
 
   const steps = useMemo(() => buildLoadingSteps(plan), [plan]);
   const totalSteps = steps.length;
-  const activeStopIds = useMemo(() => {
-    const ids = new Set<number>();
+
+  const { loadedLayerKeys, loadedStapleSlots } = useMemo(() => {
+    const layers = new Set<string>();
+    const staples = new Set<string>();
     for (let i = 0; i <= activeStep; i++) {
-      if (steps[i]) ids.add(steps[i].customer_id);
+      const s = steps[i];
+      if (!s) continue;
+      if (s.isStapleColumn) {
+        staples.add(s.slotId);
+      } else if (s.stop_sequence != null) {
+        layers.add(`${s.slotId}::${s.stop_sequence}`);
+      }
     }
-    return ids;
+    return { loadedLayerKeys: layers, loadedStapleSlots: staples };
   }, [steps, activeStep]);
 
   const currentStep = steps[activeStep];
@@ -140,13 +209,17 @@ export default function LoadingPage() {
       </div>
 
       <div className="grid grid-cols-12 gap-4">
-        {/* Truck diagram (sticky) */}
-        <div className="col-span-5 bg-white border border-gray-200 rounded-lg p-3 self-start sticky top-3">
-          <h2 className="font-bold text-sm mb-2">Estat del camió</h2>
-          <TruckLoadDiagram
+        {/* 3D truck scene (sticky) */}
+        <div className="col-span-6 bg-white border border-gray-200 rounded-lg p-3 self-start sticky top-3">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-bold text-sm">Estat del camió · 3D</h2>
+            <span className="text-[10px] text-gray-500">arrossega per girar</span>
+          </div>
+          <TruckScene3D
             plan={plan}
+            loadedLayerKeys={loadedLayerKeys}
+            loadedStapleSlots={loadedStapleSlots}
             currentSlotId={currentStep?.slotId ?? null}
-            loadedSlotIds={new Set(steps.slice(0, activeStep + 1).map((s) => s.slotId))}
           />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
             <Counter label="Pas" value={`${activeStep + 1} / ${totalSteps}`} />
@@ -186,7 +259,7 @@ export default function LoadingPage() {
         </div>
 
         {/* Steps list */}
-        <div className="col-span-7 flex flex-col gap-2">
+        <div className="col-span-6 flex flex-col gap-2">
           {steps.map((s, i) => (
             <StepCard
               key={`${s.slotId}-${s.layerIndex}-${s.stop_sequence}`}
@@ -211,7 +284,6 @@ export default function LoadingPage() {
         columna del producte). Els palets LIFO es carreguen pel terra (última
         parada) cap a dalt (primera parada).
       </p>
-      {activeStopIds.size > 0 && null /* unused for now, future highlight */}
     </div>
   );
 }
@@ -238,7 +310,9 @@ function StepCard({
   done: boolean;
   onClick: () => void;
 }) {
-  const colour = colorForCustomer(step.customer_id);
+  const colour = step.customer_id == null
+    ? '#E30613'  // damm-red for the staple column
+    : colorForCustomer(step.customer_id);
   return (
     <button
       onClick={onClick}
@@ -275,7 +349,7 @@ function StepCard({
           </div>
           <div className="text-xs text-gray-700">
             {step.isStapleColumn
-              ? `Tota la columna del producte`
+              ? 'Una sola onada de magatzem · tota la columna del producte'
               : `Per a parada #${step.stop_sequence} · ${step.customer_name}`}
           </div>
           <ul className="mt-2 text-xs space-y-0.5">
@@ -297,109 +371,3 @@ function StepCard({
   );
 }
 
-function TruckLoadDiagram({
-  plan,
-  currentSlotId,
-  loadedSlotIds,
-}: {
-  plan: Plan;
-  currentSlotId: string | null;
-  loadedSlotIds: Set<string>;
-}) {
-  const grid = plan.vehicle;
-  const slotPositions: { slotId: string; row: number; col: number }[] = [];
-  for (let col = 0; col < grid.grid_cols; col++) {
-    for (let row = 0; row < grid.grid_rows; row++) {
-      const idx = col * grid.grid_rows + row + 1;
-      slotPositions.push({ slotId: `P${idx}`, row, col });
-    }
-  }
-
-  const W = 480;
-  const H = 240;
-  const cellW = (W - 80) / grid.grid_cols;
-  const cellH = (H - 80) / grid.grid_rows;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded" style={{ background: 'linear-gradient(180deg,#f8fafc 0%,#e2e8f0 100%)' }}>
-      <rect x={10} y={20} width={W - 20} height={H - 40} rx={10} fill="#fff" stroke="#1A1A1A" strokeWidth={2} />
-      <rect x={10} y={50} width={45} height={H - 100} rx={6} fill="#1A1A1A" />
-      <rect x={16} y={58} width={33} height={22} rx={3} fill="#7DD3FC" opacity={0.7} />
-      <rect x={60} y={20} width={W - 80} height={5} fill="#E30613" rx={2} />
-      <text x={W / 2} y={14} textAnchor="middle" fontSize={9} fill="#475569" fontWeight="bold">CABINA ◄ Sentit de la marxa</text>
-      <text x={W - 12} y={H / 2} textAnchor="middle" fontSize={9} fill="#475569" fontWeight="bold" transform={`rotate(90 ${W - 12} ${H / 2})`}>PORTA POSTERIOR</text>
-
-      {slotPositions.map(({ slotId, row, col }) => {
-        const x = 65 + col * cellW + 4;
-        const y = 38 + row * cellH + 4;
-        const w = cellW - 8;
-        const h = cellH - 8;
-        const pa = plan.pallet_assignments.find((p) => p.slot_id === slotId);
-        const customerIds = pa?.customer_ids ?? [];
-        const isStaple = customerIds.length >= 5;
-        const isLoaded = loadedSlotIds.has(slotId);
-        const isCurrent = slotId === currentSlotId;
-
-        let fill: React.ReactNode;
-        if (!pa || customerIds.length === 0) {
-          fill = <rect x={x} y={y} width={w} height={h} rx={4} fill="#E5E7EB" stroke="#1A1A1A" strokeWidth={1} />;
-        } else if (isStaple) {
-          const stripeW = w / Math.min(customerIds.length, 8);
-          fill = (
-            <>
-              {customerIds.slice(0, 8).map((cid, i) => (
-                <rect
-                  key={cid}
-                  x={x + i * stripeW}
-                  y={y}
-                  width={stripeW}
-                  height={h}
-                  fill={colorForCustomer(cid)}
-                  opacity={isLoaded ? 1 : 0.25}
-                />
-              ))}
-              <rect x={x} y={y} width={w} height={h} rx={4} fill="none" stroke={isCurrent ? '#E30613' : '#1A1A1A'} strokeWidth={isCurrent ? 3 : 1.2} />
-            </>
-          );
-        } else {
-          const sorted = [...customerIds].sort((a, b) => {
-            const sa = plan.stops.find((s) => s.customer_id === a)?.sequence ?? 999;
-            const sb = plan.stops.find((s) => s.customer_id === b)?.sequence ?? 999;
-            return sa - sb;
-          });
-          const bandH = h / sorted.length;
-          fill = (
-            <>
-              {sorted.map((cid, i) => (
-                <rect
-                  key={cid}
-                  x={x}
-                  y={y + i * bandH}
-                  width={w}
-                  height={bandH}
-                  fill={colorForCustomer(cid)}
-                  opacity={isLoaded ? 1 : 0.25}
-                />
-              ))}
-              <rect x={x} y={y} width={w} height={h} rx={4} fill="none" stroke={isCurrent ? '#E30613' : '#1A1A1A'} strokeWidth={isCurrent ? 3 : 1.2} />
-            </>
-          );
-        }
-
-        return (
-          <g key={slotId}>
-            {fill}
-            <text x={x + w / 2} y={y + h / 2 + 4} textAnchor="middle" fontSize={14} fontWeight="bold" fill="#fff" stroke="#1A1A1A" strokeWidth={0.4}>
-              {slotId}
-            </text>
-            {isCurrent && (
-              <circle cx={x + w - 8} cy={y + 8} r={5} fill="#E30613">
-                <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite" />
-              </circle>
-            )}
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
