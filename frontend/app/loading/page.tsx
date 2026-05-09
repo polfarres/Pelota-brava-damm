@@ -123,13 +123,14 @@ function buildLoadingSteps(plan: Plan): LoadStep[] {
 
     // LIFO pallet: stack is TOP→BOTTOM. Load bottom-first so we walk in
     // reverse: stack[N-1] is the pallet floor (last-delivered customer).
+    const layerSteps: LoadStep[] = [];
     for (let i = stack.length - 1; i >= 0; i--) {
       const layer = stack[i];
       const layerIndex = stack.length - 1 - i;  // 0 = bottom
       const customer = customerNameById.get(layer.customer_id) ?? `client #${layer.customer_id}`;
       const aggregated = aggregateLinesBySku(layer.lines);
       if (aggregated.length === 0) continue;
-      steps.push({
+      layerSteps.push({
         slotId,
         layerIndex,
         totalLayers: stack.length,
@@ -140,6 +141,31 @@ function buildLoadingSteps(plan: Plan): LoadStep[] {
         lines: aggregated,
         totalCe: layer.ce,
       });
+    }
+
+    if (layerSteps.length > 0) {
+      steps.push(...layerSteps);
+    } else {
+      // Every per-layer aggregation rounded to zero (typical for the
+      // barrel pallet, where ~6-8 total caixes are distributed across
+      // 15 stops in fractional shares). Emit ONE whole-pallet step so
+      // the picker still loads the cargo.
+      const allLines = stack.flatMap((l) => l.lines);
+      const aggregated = aggregateLinesBySku(allLines);
+      if (aggregated.length > 0) {
+        const totalCe = pa.ce_used ?? stack.reduce((s, l) => s + l.ce, 0);
+        steps.push({
+          slotId,
+          layerIndex: 0,
+          totalLayers: 1,
+          customer_id: null,
+          customer_name: '',
+          stop_sequence: null,
+          isStapleColumn: false,
+          lines: aggregated,
+          totalCe,
+        });
+      }
     }
   }
   return steps;
@@ -168,19 +194,20 @@ export default function LoadingPage() {
   const steps = useMemo(() => buildLoadingSteps(plan), [plan]);
   const totalSteps = steps.length;
 
-  const { loadedLayerKeys, loadedStapleSlots } = useMemo(() => {
+  const { loadedLayerKeys, loadedFullSlots } = useMemo(() => {
     const layers = new Set<string>();
-    const staples = new Set<string>();
+    const fullSlots = new Set<string>();
     for (let i = 0; i <= activeStep; i++) {
       const s = steps[i];
       if (!s) continue;
-      if (s.isStapleColumn) {
-        staples.add(s.slotId);
+      if (s.customer_id == null) {
+        // Whole-pallet step — covers staples and aggregated barrel pallets.
+        fullSlots.add(s.slotId);
       } else if (s.stop_sequence != null) {
         layers.add(`${s.slotId}::${s.stop_sequence}`);
       }
     }
-    return { loadedLayerKeys: layers, loadedStapleSlots: staples };
+    return { loadedLayerKeys: layers, loadedFullSlots: fullSlots };
   }, [steps, activeStep]);
 
   const currentStep = steps[activeStep];
@@ -218,7 +245,7 @@ export default function LoadingPage() {
           <TruckScene3D
             plan={plan}
             loadedLayerKeys={loadedLayerKeys}
-            loadedStapleSlots={loadedStapleSlots}
+            loadedFullSlots={loadedFullSlots}
             currentSlotId={currentStep?.slotId ?? null}
           />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -310,9 +337,12 @@ function StepCard({
   done: boolean;
   onClick: () => void;
 }) {
-  const colour = step.customer_id == null
-    ? '#E30613'  // damm-red for the staple column
-    : colorForCustomer(step.customer_id);
+  const isWholePalletAggregate = step.customer_id == null;
+  const colour = !isWholePalletAggregate
+    ? colorForCustomer(step.customer_id as number)
+    : step.isStapleColumn
+      ? '#E30613'         // damm-red for the staple column
+      : '#78716C';        // stone-500 for aggregated barrel pallets
   return (
     <button
       onClick={onClick}

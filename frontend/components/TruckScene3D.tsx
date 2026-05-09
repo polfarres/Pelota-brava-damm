@@ -17,8 +17,10 @@ interface Props {
   plan: Plan;
   // Set of "loaded" layers, identified by `${slotId}::${stop_sequence}`.
   loadedLayerKeys: Set<string>;
-  // Set of "loaded" staple slots (whole-column entries).
-  loadedStapleSlots: Set<string>;
+  // Set of "loaded" whole-pallet slots — covers staples AND aggregated
+  // barrel/non-staple pallets where per-layer rounding zeroed out
+  // every layer (so the picker loads the slot in one warehouse wave).
+  loadedFullSlots: Set<string>;
   // Slot currently being filled (highlighted).
   currentSlotId: string | null;
 }
@@ -35,7 +37,7 @@ function isStapleSlot(pa: { lines: { sku: string }[] } | undefined): boolean {
 export default function TruckScene3D({
   plan,
   loadedLayerKeys,
-  loadedStapleSlots,
+  loadedFullSlots,
   currentSlotId,
 }: Props) {
   const grid = plan.vehicle;
@@ -141,7 +143,7 @@ export default function TruckScene3D({
                 stack={stack}
                 isStaple={staple}
                 loadedLayerKeys={loadedLayerKeys}
-                loadedStaple={loadedStapleSlots.has(slotId)}
+                loadedFull={loadedFullSlots.has(slotId)}
                 width={palletWidth - 0.2}
                 depth={palletDepth - 0.2}
                 cargoHeight={cargoHeight - 0.3}
@@ -221,7 +223,7 @@ function PalletStack({
   stack,
   isStaple,
   loadedLayerKeys,
-  loadedStaple,
+  loadedFull,
   width,
   depth,
   cargoHeight,
@@ -230,34 +232,46 @@ function PalletStack({
   stack: StackLayer[];
   isStaple: boolean;
   loadedLayerKeys: Set<string>;
-  loadedStaple: boolean;
+  loadedFull: boolean;
   width: number;
   depth: number;
   cargoHeight: number;
 }) {
   const palletTop = 0.16;        // top surface of the pallet base
 
-  if (isStaple) {
-    // Staple column: paint as a single tall striped box, one stripe per
-    // customer. Appears in full when the picker has run the wave.
-    if (!loadedStaple) return null;
+  // Whole-pallet rendering: covers both staples (Tier-1 SKU column)
+  // and barrel/aggregated pallets where per-layer rounding zeroed
+  // everything out and the picker loads the slot in one warehouse wave.
+  if (loadedFull) {
     const totalCe = stack.reduce((s, l) => s + l.ce, 0);
-    // Height proportional to CE (60 CE = full pallet height).
     const h = Math.max(0.4, Math.min(cargoHeight - 0.1, (totalCe / 60) * (cargoHeight - 0.1)));
-    const stripeWidth = depth / Math.min(stack.length, 8);
+    const uniqueCustomers: number[] = [];
+    for (const layer of stack) {
+      if (!uniqueCustomers.includes(layer.customer_id)) {
+        uniqueCustomers.push(layer.customer_id);
+      }
+    }
+    const stripeCount = Math.min(uniqueCustomers.length, 8);
+    const stripeWidth = depth / Math.max(1, stripeCount);
     return (
       <group position={[0, palletTop + h / 2, 0]}>
-        {stack.slice(0, 8).map((layer, i) => (
-          <mesh key={`${slotId}-${layer.customer_id}-${i}`} castShadow position={[-depth / 2 + stripeWidth / 2 + i * stripeWidth, 0, 0]}>
+        {uniqueCustomers.slice(0, 8).map((cid, i) => (
+          <mesh
+            key={`${slotId}-${cid}-${i}`}
+            castShadow
+            position={[-depth / 2 + stripeWidth / 2 + i * stripeWidth, 0, 0]}
+          >
             <boxGeometry args={[stripeWidth - 0.02, h, width - 0.04]} />
-            <meshStandardMaterial color={colorForCustomer(layer.customer_id)} />
+            <meshStandardMaterial color={colorForCustomer(cid)} />
           </mesh>
         ))}
-        {/* Staple star marker */}
-        <mesh position={[0, h / 2 + 0.12, 0]}>
-          <sphereGeometry args={[0.12, 16, 16]} />
-          <meshStandardMaterial color="#E30613" emissive="#E30613" emissiveIntensity={0.5} />
-        </mesh>
+        {/* Staple star marker — only on actual Tier-1 staple columns. */}
+        {isStaple && (
+          <mesh position={[0, h / 2 + 0.12, 0]}>
+            <sphereGeometry args={[0.12, 16, 16]} />
+            <meshStandardMaterial color="#E30613" emissive="#E30613" emissiveIntensity={0.5} />
+          </mesh>
+        )}
       </group>
     );
   }

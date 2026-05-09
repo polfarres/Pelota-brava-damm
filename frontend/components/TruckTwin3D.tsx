@@ -8,6 +8,15 @@ import { useState } from 'react';
 import type { Plan } from '@/lib/types';
 import { colorForCustomer } from '@/lib/colors';
 
+const STAPLE_SKUS = new Set(['CJ13', 'ED13']);
+
+function isStaplePallet(pa: { lines: { sku: string }[] } | undefined): boolean {
+  if (!pa) return false;
+  const skus = new Set(pa.lines.map((l) => l.sku));
+  if (skus.size === 0 || skus.size > 2) return false;
+  return [...skus].every((s) => STAPLE_SKUS.has(s));
+}
+
 interface Props {
   plan: Plan;
 }
@@ -112,7 +121,7 @@ export default function TruckTwin3D({ plan }: Props) {
           const { state, customerSeqs } = palletState(slotId);
           const pa = plan.pallet_assignments.find((p) => p.slot_id === slotId);
           const customerIds = pa?.customer_ids ?? [];
-          const isStaple = customerIds.length >= 5;  // staple column spans most/all stops
+          const isStaple = isStaplePallet(pa);  // only true Tier-1 SKU columns
 
           const opacity =
             state === 'delivered' ? 0.25 : state === 'partial' ? 0.7 : 1;
