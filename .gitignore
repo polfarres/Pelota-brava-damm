@@ -9,6 +9,7 @@ desktop.ini
 # Editor/IDE local state
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
@@ -39,3 +40,6 @@ build/
 # Processed parquet files ARE committed (locked decision A-19).
 # Geocode cache IS committed too — saves the team from re-hammering Nominatim
 # for 1,200 addresses on every fresh clone.
+
+# One-off scratch directory used by emitter smoke tests during dev.
+backend/data/test_emitter_output/
