@@ -43,3 +43,6 @@ build/
 
 # One-off scratch directory used by emitter smoke tests during dev.
 backend/data/test_emitter_output/
+
+# Demo runner output — regenerate locally before pitching, not committed.
+backend/data/demo_output/
