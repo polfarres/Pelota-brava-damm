@@ -13,6 +13,32 @@ interface Props {
   runId?: string;
 }
 
+// When multiple customers share an address (e.g. several bars on the same
+// "CALLE GRAN" with no street number resolution), the geocoder hands back
+// identical lat/lon and the markers stack into one. Spread overlapping
+// markers around their shared point in a small fixed-radius circle so each
+// stop is individually clickable.
+const JITTER_RADIUS_DEG = 0.0004; // ~45m
+
+function jitterCoincidentMarker(
+  stops: StopPlan[],
+  current: StopPlan,
+): [number, number] {
+  if (current.lat == null || current.lon == null) {
+    return [current.lat as number, current.lon as number];
+  }
+  const sameSpot = stops.filter(
+    (s) => s.lat === current.lat && s.lon === current.lon,
+  );
+  if (sameSpot.length <= 1) return [current.lat, current.lon];
+  const idx = sameSpot.findIndex((s) => s.sequence === current.sequence);
+  const angle = (2 * Math.PI * idx) / sameSpot.length;
+  return [
+    current.lat + JITTER_RADIUS_DEG * Math.cos(angle),
+    current.lon + JITTER_RADIUS_DEG * Math.sin(angle),
+  ];
+}
+
 export default function MapView({ stops, selectedSeq, onSelect, runId }: Props) {
   const [mounted, setMounted] = useState(false);
   const [Components, setComponents] = useState<any>(null);
@@ -114,11 +140,12 @@ export default function MapView({ stops, selectedSeq, onSelect, runId }: Props) 
         if (s.lat == null || s.lon == null) return null;
         const colour = CLUSTER_COLORS[s.customer_id] || '#666';
         const isSelected = selectedSeq === s.sequence;
+        const [latJ, lonJ] = jitterCoincidentMarker(stops, s);
         return (
           <Marker
             key={s.sequence}
-            position={[s.lat, s.lon]}
-            icon={numberedIcon(s.sequence, isSelected ? '#1A1A1A' : colour)}
+            position={[latJ, lonJ]}
+            icon={numberedIcon(s.sequence, isSelected ? '#E30613' : colour)}
             eventHandlers={{
               click: () => onSelect(s.sequence),
             }}
