@@ -1,0 +1,67 @@
+# DR-008 / A-32 — Furgoneta 3-pallet (×1 in fleet).
+#
+# Top view (front of cargo box at top, rear doors at bottom):
+#
+#       LEFT curtain ┐
+#                    │
+#                +-------+    front
+#                |  P1   |    LATERAL access only (mentor: "el del fons es treu pel lateral")
+#                +-------+
+#                |  P2   |    REAR access; blocked by P3
+#                +-------+
+#                |  P3   |    REAR access; first out
+#                +-------+    rear doors
+#
+# Pos 1 lateral side defaults to LEFT pending MQ-D-18.
+
+profile_id: FURGO_3P
+display_name: "Furgoneta 3 palets (lateral + rear)"
+fleet_count: 1
+external_dim_cm: [550, 210, 280]
+internal_dim_cm: [340, 180, 210]
+access:
+  rear_doors: true
+  rear_lift: false
+  curtain: SINGLE_SIDE
+  partition: false
+slots:
+  - id: P1
+    type: PALLET_FLOOR
+    pos_cm: [240, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE, BARREL_EMPTY, TUBE]
+    capacity_ce: 60.0
+    max_weight_kg: 600
+    reachable_from: [LEFT]
+    blocked_by_per_face: {}
+    can_host_returns_of: [BRL, CASE, BARREL_EMPTY, TUBE]
+    notes: "Mentor: deepest pallet extracted laterally. Side default LEFT (MQ-D-18 open)."
+  - id: P2
+    type: PALLET_FLOOR
+    pos_cm: [120, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE, BARREL_EMPTY, TUBE]
+    capacity_ce: 60.0
+    max_weight_kg: 600
+    reachable_from: [REAR]
+    blocked_by_per_face:
+      REAR: [P3]
+    can_host_returns_of: [BRL, CASE, BARREL_EMPTY, TUBE]
+  - id: P3
+    type: PALLET_FLOOR
+    pos_cm: [0, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE, BARREL_EMPTY, TUBE]
+    capacity_ce: 60.0
+    max_weight_kg: 600
+    reachable_from: [REAR]
+    blocked_by_per_face:
+      REAR: []
+    can_host_returns_of: [BRL, CASE, BARREL_EMPTY, TUBE]
+total_capacity_ce: 180.0
+nominal_payload_kg: 1200.0
+envase_zone_slot_ids: [P3]
+lifo_order_per_face:
+  REAR: [P3, P2]
+  LEFT: [P1]
+schema_version: "1.1"

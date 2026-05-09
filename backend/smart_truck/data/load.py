@@ -1,13 +1,15 @@
 """ETL: read raw xlsx files into clean parquet (FR-001).
 
-Inputs: ``Hackaton/DAMM/{Hackaton.xlsx, Horarios Entrega.XLSX, ZM040.XLSX}``.
+Inputs: ``Hackaton/DAMM/{Hackaton.xlsx, Horarios Entrega.XLSX, ZM040.XLSX,
+Caixes_Estadístiques.xlsx}``.
 Outputs (in ``backend/data/processed/``):
 
 - ``customers.parquet``     - DR-001.C
 - ``zones.parquet``         - DR-001.D
-- ``products.parquet``      - DR-001.E + DR-003 (collapsed)
+- ``products.parquet``      - DR-001.E + DR-003 (collapsed) + DR-010 ce_per_unit
 - ``time_windows.parquet``  - DR-002 (only canonical 9100... IDs)
 - ``deliveries.parquet``    - DR-001.A (legacy ``DA...`` route filtered out)
+- ``ce_coverage.json``      - DR-010 source breakdown per SKU
 
 Run::
 
@@ -16,17 +18,21 @@ Run::
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RAW_DIR = REPO_ROOT / "Hackaton" / "DAMM"
 DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
+CE_OVERRIDES_FILE = REPO_ROOT / "backend" / "smart_truck" / "data" / "ce_overrides.yaml"
 
 FILE_HACKATON = RAW_DIR / "Hackaton.xlsx"
 FILE_HORARIOS = RAW_DIR / "Horarios Entrega.XLSX"
 FILE_ZM040 = RAW_DIR / "ZM040.XLSX"
+FILE_CE_MASTER = RAW_DIR / "Caixes_Estadístiques.xlsx"
 
 
 def normalise_postcode(cp: object) -> str:
@@ -159,30 +165,100 @@ def _is_returnable(description: object) -> bool:
     return "RET" in str(description).upper()
 
 
-def _return_rate(sku: object, description: object) -> float:
-    """A-07: BRL=100% RET=80% SR=0% other=60%."""
-    s = str(sku).upper() if pd.notna(sku) else ""
-    d = str(description).upper() if pd.notna(description) else ""
-    if s.startswith("BRL"):
-        return 1.00
-    if " SR" in f" {d}" or s.endswith("SR"):
-        return 0.00
-    if "RET" in d:
-        return 0.80
-    return 0.60
+# A-35 supersedes the per-class A-07 rates with a flat 60 % global.
+RETURN_RATE_FLAT = 0.60
 
 
-def load_products() -> pd.DataFrame:
+def _load_ce_overrides() -> dict[str, float]:
+    if not CE_OVERRIDES_FILE.exists():
+        return {}
+    with CE_OVERRIDES_FILE.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return {str(k): float(v) for k, v in data.items()}
+
+
+def _load_ce_master() -> dict[str, float]:
+    """Authoritative SKU → CE per delivery unit from the mentor-supplied file.
+
+    Returns empty dict when the file is missing — callers fall back to ZM040.
+    The file's column names aren't fixed yet; we accept any header whose
+    name matches one of the known synonyms (case-insensitive).
+    """
+    if not FILE_CE_MASTER.exists():
+        return {}
+    df = pd.read_excel(FILE_CE_MASTER)
+    sku_col = _first_match(df.columns, ("material", "sku", "código", "codigo"))
+    ce_col = _first_match(df.columns, ("ce", "caixes", "estadistic", "estadístic"))
+    if sku_col is None or ce_col is None:
+        return {}
+    out: dict[str, float] = {}
+    for sku, ce in zip(df[sku_col], df[ce_col]):
+        if pd.isna(sku) or pd.isna(ce):
+            continue
+        try:
+            out[str(sku).strip()] = float(ce)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _first_match(cols, needles: tuple[str, ...]) -> str | None:
+    for c in cols:
+        cl = str(c).lower()
+        if any(n in cl for n in needles):
+            return c
+    return None
+
+
+def _ce_from_zm040(zm: pd.DataFrame) -> dict[str, float]:
+    """ZM040 fallback: CE = ZCE_row.Denominator / 100."""
+    zce = zm[zm["uom"] == "ZCE"][["sku", "Denom."]].copy() if "Denom." in zm.columns else None
+    if zce is None or zce.empty:
+        return {}
+    zce = zce.rename(columns={"Denom.": "denom"}).dropna(subset=["denom"])
+    zce = zce.drop_duplicates("sku", keep="first")
+    return {str(r["sku"]): float(r["denom"]) / 100.0 for _, r in zce.iterrows()}
+
+
+def resolve_ce_per_unit(
+    sku: str,
+    overrides: dict[str, float],
+    ce_master: dict[str, float],
+    ce_zm040: dict[str, float],
+) -> tuple[float, str]:
+    """DR-010 source priority: OVERRIDE > CE_MASTER > ZCE_ROW > DEFAULT (=1.0)."""
+    if sku in overrides:
+        return overrides[sku], "OVERRIDE"
+    if sku in ce_master:
+        return ce_master[sku], "CE_MASTER"
+    if sku in ce_zm040:
+        return ce_zm040[sku], "ZCE_ROW"
+    return 1.0, "DEFAULT"
+
+
+def load_products() -> tuple[pd.DataFrame, dict[str, list[str]]]:
+    """Returns (products_df, ce_coverage) — coverage maps source → SKU list."""
     zubic = _load_materials_zubic()
     zm = _load_zm040()
     flat = _collapse_zm040(zm)
     products = zubic.merge(flat, on="sku", how="left")
     products["is_envase"] = products["sku"].apply(_is_envase)
     products["is_returnable"] = products["description"].apply(_is_returnable)
-    products["return_rate"] = products.apply(
-        lambda r: _return_rate(r["sku"], r["description"]), axis=1
+    products["return_rate"] = RETURN_RATE_FLAT  # A-35
+
+    overrides = _load_ce_overrides()
+    ce_master = _load_ce_master()
+    ce_zm040 = _ce_from_zm040(zm)
+    ce_results = products["sku"].apply(
+        lambda s: resolve_ce_per_unit(str(s), overrides, ce_master, ce_zm040)
     )
-    return products
+    products["ce_per_unit"] = [r[0] for r in ce_results]
+    products["ce_source"] = [r[1] for r in ce_results]
+
+    coverage: dict[str, list[str]] = {"OVERRIDE": [], "CE_MASTER": [], "ZCE_ROW": [], "DEFAULT": []}
+    for sku, src in zip(products["sku"], products["ce_source"]):
+        coverage[src].append(str(sku))
+    return products, coverage
 
 
 # ---------------------------------------------------------------------------
@@ -310,10 +386,13 @@ def main() -> None:
     zones.to_parquet(DATA_DIR / "zones.parquet", index=False)
     print(f"  {len(zones):,} zone rows")
 
-    print("Loading products (Materiales zubic + ZM040)...")
-    products = load_products()
+    print("Loading products (Materiales zubic + ZM040 + CE master)...")
+    products, ce_coverage = load_products()
     products.to_parquet(DATA_DIR / "products.parquet", index=False)
-    print(f"  {len(products):,} products")
+    with (DATA_DIR / "ce_coverage.json").open("w", encoding="utf-8") as f:
+        json.dump({k: sorted(set(v)) for k, v in ce_coverage.items()}, f, indent=2)
+    summary = {k: len(set(v)) for k, v in ce_coverage.items()}
+    print(f"  {len(products):,} products | CE source breakdown: {summary}")
 
     print("Loading time windows...")
     tw = load_time_windows()

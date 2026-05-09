@@ -52,9 +52,26 @@ def test_closed_flag_set_when_window_zero() -> None:
     assert (df["is_closed"] == same_zero).all()
 
 
-def test_return_rate_classes() -> None:
-    products = L.load_products()
-    # BRL barrels should always be 100%.
-    barrels = products[products["sku"].astype(str).str.startswith("BRL")]
-    if len(barrels):
-        assert (barrels["return_rate"] == 1.00).all()
+def test_return_rate_flat_60_pct_a35() -> None:
+    products, _ = L.load_products()
+    assert (products["return_rate"] == L.RETURN_RATE_FLAT).all()
+    assert L.RETURN_RATE_FLAT == 0.60
+
+
+def test_ce_per_unit_source_priority_dr010() -> None:
+    overrides = {"FAKE_OVERRIDE": 7.0}
+    ce_master = {"FAKE_MASTER": 2.5, "FAKE_OVERRIDE": 99.0}
+    ce_zm040 = {"FAKE_ZCE": 1.5, "FAKE_MASTER": 99.0}
+
+    assert L.resolve_ce_per_unit("FAKE_OVERRIDE", overrides, ce_master, ce_zm040) == (7.0, "OVERRIDE")
+    assert L.resolve_ce_per_unit("FAKE_MASTER", overrides, ce_master, ce_zm040) == (2.5, "CE_MASTER")
+    assert L.resolve_ce_per_unit("FAKE_ZCE", overrides, ce_master, ce_zm040) == (1.5, "ZCE_ROW")
+    assert L.resolve_ce_per_unit("UNKNOWN", overrides, ce_master, ce_zm040) == (1.0, "DEFAULT")
+
+
+def test_ce_per_unit_column_present() -> None:
+    products, coverage = L.load_products()
+    assert "ce_per_unit" in products.columns
+    assert "ce_source" in products.columns
+    assert (products["ce_per_unit"] > 0).all()
+    assert set(coverage) == {"OVERRIDE", "CE_MASTER", "ZCE_ROW", "DEFAULT"}

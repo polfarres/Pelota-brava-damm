@@ -23,17 +23,24 @@ Priorities:
 
 Open with one sentence to set context: *"Estamos optimizando ruta y carga conjuntamente para una carga real, la `11764300` del 8 de mayo del repartidor Fran Romero, ruta DR0027. Vamos a usarla como caso de estudio. Tenemos algunas dudas operativas para que el modelo refleje la realidad."*
 
-### ✅ MQ-D-01 — Truck pallet geometry — Locked 2026-05-09 (still ask mentor to confirm)
+### ✅ MQ-D-01 — Truck pallet geometry — Resolved 2026-05-09 (mentor session)
 
-**Locked**: furgoneta 1×3, 6-pallet truck 2×3, 8-pallet truck 2×4. EUR 80×120 cm pallets. Vertical stack ≤ 1.80 m per slot. Barrels = 1 slot each (stack vertically up to 1.80 m).
+**Refined by mentor input. Original A-01 superseded by A-30..A-34 and DR-008.**
 
-**Ask the mentor anyway** (5 min) to confirm and to learn whether kegs are loaded somewhere physically distinct from cases (e.g. floor near the back door): *"Hemos asumido furgo 1×3, camión 6 palets 2×3 y de 8 palets 2×4, EUR 80×120 con apilado vertical hasta 1,80 m. Barriles ocupan slot completo. ¿Coincide con la realidad?"*
+Confirmed fleet topology (4 distinct profiles):
 
-### ✅ MQ-D-02 — Return rates per SKU class — Locked 2026-05-09 (still ask mentor for refinement)
+- **Furgoneta (×1, 3 pallets in line)** — pos 1 (deepest) accessible *only* via the lateral curtain; pos 2 & 3 accessible *only* via rear doors and follow LIFO (P3 out before P2). *"els tres estan en línia i el del fons es treu pel lateral."*
+- **6-pallet truck (×11, 2×3)** — opens *only* from the two side curtains; central partition (*reixa*) blocks cross-row access; no rear access.
+- **8-pallet truck (×4, 2×4)** — same partitioned regime as 6P; no rear access.
+- **8-pallet truck with tail-lift (×4, 2×4)** — partitioned curtains *and* rear doors with `ascensor`.
 
-**Locked**: BRL = 100%, RET = 80%, SR = 0%, other = 60%. Drives the returns / free-space tracker.
+Capacity is **volumetric, not weight-based** (A-30). A pallet holds **60 caixes estadístiques (CE)** (A-31); per-SKU CE pulled from ZM040 `ZCE` UoM row.
 
-**Ask the mentor anyway** (3 min): *"Estamos asumiendo BRL 100%, RET 80%, SR 0%, otros 60%. ¿Veis bien esos números o hay categorías con un ratio de devolución sustancialmente distinto?"*
+### ✅ MQ-D-02 — Return rate model — Resolved 2026-05-09 (mentor session)
+
+**Mentor input supersedes original A-07.** New decision (A-35): **flat 60 % global return rate** applied to outbound CE per stop — replaces the prior per-class breakdown.
+
+Mentor noted seasonality: empirically lower in summer, higher in winter, but "no sabem quantitats exactes" — we don't model the variation in v1; reserve the nuance for the pitch only. See `MQ-D-23` if there's room to refine.
 
 ### ✅ MQ-D-03 — Ground truth for the demo carga — Resolved 2026-05-09
 
@@ -107,6 +114,62 @@ Decision: flag in driver UI only, no routing impact. Mentor question optional �
 
 Decision: soft penalty (medium weight) on deviating from baseline, with a UI toggle ("familiar" vs "optimal"). Mentor question optional — useful as colour for the pitch, not blocking.
 
+### ✅ MQ-D-16 — Side-curtain symmetry on 6P / 8P — Resolved 2026-05-09 (mentor session)
+
+Mentor confirmed: 6P and 8P trucks have a **central partition (*reixa*)** between the two lateral rows; you cannot reach one row from the opposite curtain. Each side is independent. No rear access on the standard 6P / 8P. Modelled as `CurtainAccess.BOTH_SIDES_PARTITIONED` (A-33, DR-008).
+
+### 🔴 MQ-D-17 — Vehicle profile resolution per matrícula
+
+**Ask**: *"¿Existe alguna tabla matrícula → tipo de vehículo (6 palets / 8 palets / 8 palets con ascensor / furgoneta) para los ~470 vehículos de la flota? En particular, ¿la matrícula `7524KXX` (vehículo `V235045`, ruta DR0027 del 2026-05-08) corresponde a 6P, 8P o 8P+ascensor?"*
+
+**Why**: The packer needs to resolve `V… → profile_id` automatically; otherwise we hard-code the demo route's vehicle.
+
+**What we do**: import the table at ETL time and join on `Vehículo` (Hoja Carga) / matrícula (Hoja Ruta).
+
+**Fallback**: hard-code `DR0027 → TRUCK_6P_SC` (the most numerous fleet class — 11 / 20 vehicles) and surface a "vehicle resolution unknown" warning for any other route. Pitch is unaffected.
+
+### 🟡 MQ-D-18 — Furgoneta lateral side
+
+**Ask**: *"En la furgoneta 3 palets, el palet del fondo se extrae por el lateral. ¿Por el lateral izquierdo o por el derecho? ¿Es la misma puerta lateral siempre, o cualquiera de los dos?"*
+
+**Why**: Encodes `Slot.reachable_from` for `FURGO_3P.P1`.
+
+**Fallback**: assume `LEFT`. Cosmetic if wrong; the only consequence is which side of the truck twin animates.
+
+### ✅ MQ-D-19 — Kegs and pallets — Resolved 2026-05-09 (CE model)
+
+The volumetric (CE) model handles kegs uniformly: 1 keg = 4 CE → 15 kegs per pallet (A-31, verified). No need for a separate floor zone in v1. The `FLOOR_KEG` slot type stays in DR-008 for future refinement but is not populated in any current profile.
+
+### 🟢 MQ-D-20 — BRL colour semantics
+
+**Ask**: *"Las cajas BRL de colores (rojo, azul, verde / SANMY) — ¿el color identifica el cliente, la categoría de producto, o no significa nada operativamente?"*
+
+**Why**: Could enable a soft clustering bonus per colour in the packer.
+
+**Fallback**: ignore colour in v1.
+
+### 🔴 MQ-D-21 — TRUCK_8P_LIFT rear-door access depth
+
+**Ask**: *"En los 4 camiones de 8 palets con ascensor trasero, cuando se usa la puerta de atrás, ¿cuántos palets se pueden bajar antes de tener que mover los demás? ¿Solo los 2 traseros, o se puede llegar más adentro porque el `ascensor` saca el palet ya completo?"*
+
+**Why**: Drives the `TRUCK_8P_LIFT.lifo_order_per_face[REAR]` encoding. If only the 2 rearmost are reachable, `[P7, P8]` blocks everything else; if all 8 are reachable in strict LIFO, `[P7, P8, P5, P6, P3, P4, P1, P2]`.
+
+**Fallback**: strict LIFO `[P7..P1]`; lateral curtains remain the primary access path for non-rearmost slots.
+
+### ✅ MQ-D-22 — CE consistency — Largely resolved 2026-05-09
+
+Mentor will deliver `Caixes_Estadístiques.xlsx` with CE per delivery unit for every SKU. This file becomes the authoritative source (DR-010). ZM040 `ZCE` row remains as fallback only. The `0CF0054` discrepancy is no longer blocking — the new file resolves it correctly.
+
+**Optional follow-up** (2 min if mentor offers time): *"¿Sabes si el fichero de CE incluye también los SKUs de envases (3ENV…, BRL30V, TB8V) o solo producto lleno?"* — drives whether outbound envases need a CE override.
+
+### 🟢 MQ-D-23 — Returns rate seasonality
+
+**Ask**: *"Para el ratio de devolución del 60 %, mencionaste que en verano es menor y en invierno mayor. ¿Tienes algún rango típico (ej. julio = 50 %, enero = 70 %)? Aunque no lo modelemos en v1, nos serviría para mencionarlo en el pitch."*
+
+**Why**: Pitch colour. Not blocking.
+
+**Fallback**: present 60 % flat with the seasonal direction qualitatively.
+
 ---
 
 ## Technical / infra mentor
@@ -151,19 +214,21 @@ Stdout logs are sufficient for a localhost demo. Skip Sentry / error-tracking un
 
 Most questions are now locked by team decision. Use the DAMM mentor as a sanity check + to unblock the few remaining open items. The technical mentor session is no longer necessary for v1 since localhost + free providers cover everything.
 
-**DAMM mentor (15 min, focused)**:
-1. Set context (1 min) — DR0027 / 2026-05-08, walk in with the printed Hoja Carga in hand.
-2. **🔴 MQ-D-03** ground truth on the as-printed order (3 min) — the only critical open item.
-3. **🔴 MQ-D-11** the Descarga column convention (3 min) — pitch-critical.
-4. **MQ-D-01** quick confirm of truck grids + barrel handling (2 min).
-5. **MQ-D-02** confirm return rate ranges (2 min).
-6. **MQ-D-10** sanity-check the 10 + 2×zones service-time model (2 min).
-7. Buffer (2 min) — let them volunteer anything we haven't asked.
+**DAMM mentor (15 min, focused)** — most v1 items now resolved; remaining critical asks are around vehicle resolution.
+
+1. Set context (1 min) — DR0027 / 2026-05-08, walk in with the printed Hoja Carga + the four vehicle profiles printed.
+2. **🔴 MQ-D-17** matrícula → tipo de vehículo table (3 min) — needed to scale beyond DR0027.
+3. **🔴 MQ-D-21** TRUCK_8P_LIFT rear-door access depth (3 min) — drives the LIFO encoding.
+4. **🟡 MQ-D-18** furgoneta lateral side (1 min).
+5. **🟡 MQ-D-10** sanity-check the 10 + 2 × zones service-time model (2 min).
+6. Confirm receipt of `Caixes_Estadístiques.xlsx` and ask whether envase SKUs are included (1 min, see MQ-D-22).
+7. Buffer (4 min) — let them volunteer anything we haven't asked.
 
 **Bonus asks if mentor offers more time**:
-- More demo days for DR0027 (validation set).
-- Internal lat/lon (would let us drop Nominatim).
-- Per-customer informal preferences not in the Horarios file.
+- More demo days for DR0027 (validation set, MQ-D-12).
+- Internal lat/lon (would let us drop Nominatim, MQ-D-13).
+- BRL colour semantics (MQ-D-20).
+- Returns rate seasonal range (MQ-D-23).
 
 ## After the meeting
 

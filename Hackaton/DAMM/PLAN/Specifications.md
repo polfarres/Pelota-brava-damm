@@ -406,6 +406,162 @@ class HojaRutaStop:
     cash_total: Decimal      # 0 for CREDITO
 ```
 
+### DR-008 — Vehicle profile schema + four concrete profiles ★
+
+Supersedes the flat M×N grid in original A-01. Profiles live as YAML in `backend/smart_truck/data/vehicles/` and are loaded once into `VehicleProfile` instances.
+
+#### Schema
+
+```python
+class SlotType(str, Enum):
+    PALLET_FLOOR = "PALLET_FLOOR"   # full pallet position; 60 CE max (A-31)
+    SHELF        = "SHELF"
+    FLOOR_KEG    = "FLOOR_KEG"
+    OVERFLOW     = "OVERFLOW"
+
+class AccessFace(str, Enum):
+    REAR = "REAR"; LEFT = "LEFT"; RIGHT = "RIGHT"; TOP = "TOP"
+
+class CurtainAccess(str, Enum):
+    NONE                    = "NONE"
+    SINGLE_SIDE             = "SINGLE_SIDE"
+    BOTH_SIDES_PARTITIONED  = "BOTH_SIDES_PARTITIONED"   # central reixa (A-33)
+    BOTH_SIDES_OPEN         = "BOTH_SIDES_OPEN"
+
+@dataclass
+class AccessMechanism:
+    rear_doors: bool
+    rear_lift: bool                  # ascensor (TRUCK_8P_LIFT only, A-34)
+    curtain: CurtainAccess
+    partition: bool                  # central reixa? blocks cross-side reach
+
+@dataclass
+class Slot:
+    id: str                          # "P1", "P3", "K1", "S2-L1"
+    type: SlotType
+    pos_cm: tuple[float,float,float] # origin = front-left-floor
+    size_cm: tuple[float,float,float]
+    accepts: list[LoadUnitClass]     # whitelist (DR-009)
+    capacity_ce: float               # 60 for PALLET_FLOOR; scaled for shelves/kegs
+    max_weight_kg: float             # informational only — A-30
+    reachable_from: list[AccessFace]
+    blocked_by_per_face: dict[AccessFace, list[str]] = field(default_factory=dict)
+    can_host_returns_of: list[LoadUnitClass] = field(default_factory=list)
+    notes: str = ""
+
+@dataclass
+class VehicleProfile:
+    profile_id: str                  # FURGO_3P / TRUCK_6P_SC / TRUCK_8P_SC / TRUCK_8P_LIFT
+    display_name: str
+    fleet_count: int                 # 1 / 11 / 4 / 4 (slide 3 + mentor)
+    external_dim_cm: tuple[float,float,float]
+    internal_dim_cm: tuple[float,float,float]
+    access: AccessMechanism
+    slots: list[Slot]
+    total_capacity_ce: float         # = sum(slot.capacity_ce)
+    nominal_payload_kg: float        # informational only — A-30
+    envase_zone_slot_ids: list[str]  # default landing zone for outbound envases
+    lifo_order_per_face: dict[AccessFace, list[str]] = field(default_factory=dict)
+    schema_version: str = "1.1"
+```
+
+The key invariant: **`Slot.blocked_by_per_face` is the only adjacency model**. Side-partitioned vehicles (A-33) encode the partition by giving left-side slots `reachable_from=[LEFT]` only and right-side slots `reachable_from=[RIGHT]` only — there is no cross-row LEFT/RIGHT.
+
+#### Profile files
+
+| File | Profile | Fleet | Access | Slots | Total CE |
+|---|---|---|---|---|---|
+| `furgo_3p.yaml` | `FURGO_3P` | 1 | LEFT (P1 only) + REAR (P2/P3 LIFO) | 3 PALLET_FLOOR | 180 |
+| `truck_6p_sidecurtain.yaml` | `TRUCK_6P_SC` | 11 | LEFT (P1/P3/P5) ∥ RIGHT (P2/P4/P6); central partition | 6 PALLET_FLOOR | 360 |
+| `truck_8p_sidecurtain.yaml` | `TRUCK_8P_SC` | 4 | LEFT (P1/P3/P5/P7) ∥ RIGHT (P2/P4/P6/P8); central partition | 8 PALLET_FLOOR | 480 |
+| `truck_8p_lift.yaml` | `TRUCK_8P_LIFT` | 4 | as 8P_SC + REAR with `ascensor` (LIFO P7..P1) | 8 PALLET_FLOOR | 480 |
+
+#### Loader & validation
+
+`backend/smart_truck/domain/vehicle_loader.py::load_all() -> dict[str, VehicleProfile]`. Round-trip test [`backend/tests/test_vehicle_profiles.py`](../backend/tests/test_vehicle_profiles.py): unique slot IDs; every `blocked_by_per_face` reference resolves to an existing slot; `total_capacity_ce == sum(s.capacity_ce)`; every `lifo_order_per_face` slot matches a `reachable_from` declaration.
+
+### DR-009 — LoadUnit taxonomy
+
+DAMM organises picking by four product categories (slide 3 of `INTERHACK Barcelona 2026.pptx`): **Barriles, Retornables, Latas, Cajas**, with rotation by volume. The packer's load-unit primitives encode this:
+
+```python
+class LoadCategory(str, Enum):           # DAMM's official 4 categories
+    BARRIL     = "BARRIL"
+    RETORNABLE = "RETORNABLE"
+    LATA       = "LATA"
+    CAJA       = "CAJA"
+
+class LoadUnitClass(str, Enum):          # placement granularity
+    EUR_PALLET        = "EUR_PALLET"
+    INDUSTRIAL_PALLET = "INDUSTRIAL_PALLET"
+    CASE              = "CASE"           # cardboard "Caja"
+    BRL               = "BRL"            # plastic returnable crate
+    KEG_FULL          = "KEG_FULL"
+    KEG_EMPTY         = "KEG_EMPTY"
+    BARREL_EMPTY      = "BARREL_EMPTY"   # BRL30V / BRL20V
+    TUBE              = "TUBE"           # TB8 / TB8V CO₂ tube
+
+@dataclass(frozen=True)
+class LoadUnit:
+    cls: LoadUnitClass
+    category: LoadCategory
+    sku: str | None
+    ce_per_unit: float                   # caixes estadístiques per delivery unit (A-31)
+    weight_kg: float                     # informational — A-30
+    is_envase: bool = False              # outbound empty (3ENV/CJV/BRL30V/TB8V)
+```
+
+`LoadUnit` instances are *derived* from `Product` (DR-003) at packer time: a stop's qty for SKU `0CF0054` becomes one `EUR_PALLET` LU when the per-stop CE total ≥ 60, else N `CASE` LUs that the consolidator stage merges.
+
+### DR-010 — CE (caixa estadística) capacity model + CE master ETL ★
+
+A pallet holds **60 CE** (A-31).
+
+#### Source priority (resolved 2026-05-09)
+
+1. **Primary (authoritative)** — DAMM mentor delivers a dedicated Excel with CE per delivery unit for every SKU at `Pelota-brava-damm/Hackaton/DAMM/Caixes_Estadístiques.xlsx`. This is the source of truth.
+2. **Fallback (if Primary missing for an SKU)** — derive from `ZM040.XLSX`: `ce_per_unit = ZCE_row.Denominator / 100`. Coverage in ZM040 = 93.4 % (6,988 / 7,478) and at least one known data bug (`0CF0054` shows 0.16 instead of 1.0 — see below).
+3. **Default (if both missing)** — `ce_per_unit = 1.0`, log warning, surface in the data-quality panel.
+
+#### Formula
+
+```
+units_per_pallet = 60 / ce_per_unit
+```
+
+#### ETL extractor
+
+`backend/smart_truck/etl/ce_master.py::ce_per_unit`:
+
+```python
+def ce_per_unit(sku: str, ce_master: dict[str, float],
+                zm040_row_group, overrides: dict[str, float]
+                ) -> tuple[float, str]:
+    """Returns (ce_value, source) where source ∈ {OVERRIDE, CE_MASTER, ZCE_ROW, DEFAULT}.
+       1. If SKU is in overrides table → return overrides[sku], "OVERRIDE".
+       2. Else if SKU is in CE master Excel → return ce_master[sku], "CE_MASTER".
+       3. Else if ZM040 has a ZCE UoM row → return Denominator/100, "ZCE_ROW".
+       4. Else → return 1.0, "DEFAULT" + log warning."""
+```
+
+#### Mentor reference cases (verified)
+
+| SKU | Description | CE | Units/pallet | Status |
+|---|---|---:|---:|---|
+| (any 1/3 RET case) | Caixa Damm 1/3 | 1.0 | 60  | ✓ mentor reference |
+| `0AG0007` | AGUA VERI 1.5L | 1.5 | 40  | ✓ verified vs. ZM040 |
+| `GBD20`   | Barril 30 L | 4.0 | 15  | ✓ verified vs. ZM040 |
+| `0CF0054` | Estrella Damm 1/3 RET | 1.0 | 60 | ⚠️ ZM040 ZCE row buggy (encodes 0.16); CE master will fix |
+
+#### Override table
+
+`backend/smart_truck/data/ce_overrides.yaml` is reserved for emergency manual fixes only. It starts empty when the CE master Excel is in place, and is populated only when the master is missing AND ZM040 is wrong (e.g. `0CF0054` until the master arrives).
+
+#### Acceptance
+
+- Unit test [`backend/tests/test_ce_master.py`](../backend/tests/test_ce_master.py) asserts the three mentor reference cases against whichever source resolves them, plus the precedence order (override > master > ZCE > default).
+- ETL emits a coverage report at `backend/data/processed/ce_coverage.json` with counts of each `source` and lists SKUs falling back to `DEFAULT`.
+
 ---
 
 ## 2. Domain model — canonical types after ETL
@@ -509,25 +665,47 @@ End state of the data layer: we materialise these as parquet files in `backend/d
   3. Pack partial stops onto consolidator pallets, each consolidator dedicated to a contiguous group of partial stops. Inside a consolidator: SKU-grouped, heaviest at bottom.
   4. Allocate the envases zone to one or two trailing pallet positions (closest to the rear door).
   5. Verify lateral reachability: every stop must touch at least one curtain face when its turn comes.
-- **Acceptance**:
-  - Total volume ≤ truck volume capacity (and per-position stack ≤ 1.80 m).
-  - Total weight ≤ truck weight capacity.
-  - Every stop's items are reachable on its turn (curtain + LIFO check).
+- **Acceptance** (revised — A-30, A-31):
+  - **Σ slot.ce_used ≤ slot.capacity_ce** for every slot. **No weight constraint** is enforced (A-30).
+  - **Σ vehicle.ce_used ≤ vehicle.total_capacity_ce**.
+  - Every stop's items are reachable on its turn via `is_reachable` (FR-006a).
   - Every stop is contiguous in pallet space (no fragmentation across non-adjacent pallets unless quantity forces it).
 - **Owner**: backend dev A.
-- **Depends on**: FR-005.
+- **Depends on**: FR-005, DR-008, DR-009, DR-010.
+
+### FR-006a — Access-driven feasibility check (extends FR-006)
+
+The packer signature changes from `(stops, pallet_grid)` to `(stops, vehicle: VehicleProfile, products)`. Three new pieces:
+
+1. **`decompose_stop_demand(stop, products) -> list[LoadUnit]`** — uses the per-SKU CE factor from DR-010 to size each LoadUnit. Emits one `EUR_PALLET` LU when a stop's per-category CE total ≥ 60; else a CE-typed `CASE` / `BRL` / `KEG_FULL` mix that the consolidator stage merges.
+2. **`first_compatible_slot(plan, vehicle, lu, stop_id) -> Slot | None`** — replaces the grid-index lookup. Compatibility = `lu.cls in slot.accepts` ∧ `slot.ce_used + lu.ce_per_unit ≤ slot.capacity_ce` ∧ `is_reachable` for `stop_id`. **No weight check** (A-30). Tie-break: minimise `distinct_in_truck_zones_touched per stop` — the FR-005 service-time saving lever.
+3. **`is_reachable(plan, vehicle, slot, stop_index, sequence) -> bool`** — for each face in `slot.reachable_from`, the face is unblocked iff every slot in `slot.blocked_by_per_face[face]` is empty by `stop_index`. For `TRUCK_6P_SC` and `TRUCK_8P_SC` (A-33) this collapses to `True` (no rear, no within-side blocking) — the only feasibility constraint is per-side capacity. For `FURGO_3P` (A-32) and `TRUCK_8P_LIFT` (A-34) the full reachability logic runs.
+
+**Feature flag** `STRICT_REACHABILITY=False` downgrades violations to logged warnings (escape hatch for the pitch demo if mentor input is incomplete).
+
+**Acceptance** (in addition to FR-006):
+- A synthetic overweight load (Σ kg > nominal_payload_kg) **must still pack successfully** — confirms A-30.
+- Furgoneta plans pass `lifo_order_per_face[REAR]` strictly.
+- Side-curtain truck plans report `unload_face_per_stop[stop_id] ∈ {LEFT, RIGHT}`.
 
 ### FR-007 — Returns / free-space tracker
-- **Input**: `LoadPlan` (FR-006), per-stop expected returns (estimated from delivered returnable units × per-class return rate), envase outbound zone.
-- **Return rates per SKU class** (locked 2026-05-09):
-  - **BRL** (barrels, kegs): 100% — every delivered barrel is collected back empty on the same stop or on a subsequent visit.
-  - **RET** (returnable bottles / cases marked `RET` in description): 80%.
-  - **SR** (sin retorno, one-way): 0%.
-  - **Other / unknown**: 60% (the brief's global average).
-- **Output**: a stop-by-stop free-space timeline. For each stop *k*, report: free units / weight available, returns picked up, fits/overflows.
-- **Acceptance**: For the demo carga, the free-space curve is non-negative at every stop. If not, the optimiser is signalled to re-order (FR-005 loop).
+- **Input**: `LoadPlan` (FR-006), per-stop expected returns (estimated from delivered units × global 60 % return rate per A-35), envase outbound zone.
+- **Return rate** (locked 2026-05-09 — supersedes original A-07):
+  - **Flat 60 % global** (A-35), applied to outbound CE per stop. Pitch-only nuance: empirically lower in summer, higher in winter.
+- **Output**: a stop-by-stop free-space timeline. For each stop *k*, report: per-slot CE available, returns picked up (CE), fits/overflows.
+- **Acceptance**: For the demo carga, the slot-typed free-space curve is non-negative at every stop. If not, the optimiser is signalled to re-order (FR-005 loop).
 - **Owner**: backend dev B.
-- **Depends on**: FR-006.
+- **Depends on**: FR-006, DR-008.
+
+### FR-007a — Slot-typed return absorption (extends FR-007)
+
+`FreeSpaceFrame` becomes a list of `(slot_id, ce_free, accepts_returns_of)`. Returns are placed via the same `first_compatible_slot` function (FR-006a) but consult `slot.can_host_returns_of` instead of `slot.accepts`.
+
+**Acceptance additions**:
+- Per-frame `Σ slot.ce_used ≤ vehicle.total_capacity_ce` — the **only** capacity constraint (A-30).
+- `KEG_EMPTY` returns only into `FLOOR_KEG` slots.
+- `BRL` returns prefer freed `PALLET_FLOOR` slots over the envase zone (so the envase zone stays available for genuine outbound envases).
+- Returns rate model: flat 60 % per A-35 (no per-class breakdown).
 
 ### FR-008 — Plan pipeline
 - **Input**: `(ruta_id, fecha)` tuple.
@@ -641,13 +819,13 @@ Most of the table below was resolved in the user-led decision session on 2026-05
 
 | ID | Status | Decision / assumption |
 |---|---|---|
-| A-01 | ✅ Locked 2026-05-09 | **Truck grids**: furgoneta 1×3, 6-pallet truck 2×3, 8-pallet truck 2×4. EUR 80×120 cm pallets. **Vertical stack ≤ 1.80 m** per slot. Barrels (BRL30/BRL20/TB8) occupy one slot each and stack vertically up to the 1.80 m limit. |
-| A-02 | ⚠️ To confirm with mentor | Side-curtain trucks allow access to any pallet from either lateral side. |
+| A-01 | ⚠️ Superseded 2026-05-09 | Originally locked as furgoneta 1×3, 6-pallet 2×3, 8-pallet 2×4 (EUR 80×120 cm, ≤ 1.80 m stack). **Superseded by DR-008 + A-30..A-34** following mentor input: topology and access mechanism are now per-vehicle, fleet has 4 distinct profiles, capacity is volumetric (CE) per A-31. |
+| A-02 | ❌ Refuted 2026-05-09 | Mentor confirmed the opposite: **6P and 8P trucks have a central partition (reixa)** between the two lateral rows; you cannot reach one side from the other. Furgoneta has 1 lateral-only slot + 2 rear-only slots. **Superseded by A-32, A-33.** |
 | A-03 | ✅ Resolved 2026-05-09 | Route codes in `Detalle entrega` are standard `DR…`, joinable directly with `ZONAS.RutReal` and Hoja Carga. The single `DA…` legacy route is filtered out during ETL. |
 | A-04 | ✅ Confirmed 2026-05-09 | Stop order on the source Hoja Ruta IS the actual delivery order. Drivers cannot re-sequence on the road because the truck load is built specifically for the printed order. The route order itself already reflects driver local experience baked in by the planner. |
 | A-05 | ✅ Resolved 2026-05-09 | `Horarios Entrega` is **complete** — every customer × weekday is explicit. `K = L = 00:00:00` means closed that day. No "default window" needed. |
 | A-06 | ✅ Locked 2026-05-09 | Service time per stop = `10 + 2 × distinct_in_truck_zones_touched` minutes. Drives the unload-time KPI delta. |
-| A-07 | ✅ Locked 2026-05-09 | Per-class return rates: BRL = 100%, RET = 80%, SR = 0%, other = 60%. |
+| A-07 | ⚠️ Superseded 2026-05-09 | Originally per-class (BRL 100%, RET 80%, SR 0%, other 60%). **Superseded by A-35**: flat 60% global return rate. Mentor noted seasonal nuance — summer < 60%, winter > 60% — reserved for the pitch only, not modelled. |
 | A-08 | ⚠️ Geocode at ETL | Mollet depot lat/lon will be geocoded via Nominatim from the address `C/Molí de Can Bassa, Nau Damm 1, 08100 Mollet del Vallès`. Sanity-check the result. |
 | A-09 | ✅ Logged | The carga `11764336` referenced on the example Albarán is a **different carga** from `11764300` on the example Hoja Carga / Hoja Ruta. We use only `11764300` for the demo. |
 | A-10 | ✅ Logged | "icired" branding on the Albarán is the e-invoicing platform; not relevant to our build. |
@@ -663,6 +841,12 @@ Most of the table below was resolved in the user-led decision session on 2026-05
 | A-20 | ✅ Locked 2026-05-09 | **Demo runs on localhost** (no live URL for v1). |
 | A-21 | ✅ Confirmed 2026-05-09 | The `Descarga` column on Hoja Carga is **always blank** today. Our intervention populates it; zero-friction adoption. The `Lote` column is also always blank — we leave it untouched in our output. |
 | A-22 | ✅ Locked 2026-05-09 | **Pitch narrative**: today, route order and truck load are *implicitly* coupled (the load is arranged around the order, and the order reflects driver experience). Smart Truck makes that coupling explicit, jointly optimised, and reproducible — instead of relying on tribal knowledge per route, per driver. |
+| A-30 | ✅ Locked 2026-05-09 | **Volume is the only binding capacity constraint. Weight is informational; do not enforce.** The packer must accept loads that exceed the truck's nominal weight rating; it must reject only on volume (CE) overflow. Drives FR-006a / FR-007a feasibility logic. |
+| A-31 | ✅ Locked 2026-05-09 | **Pallet capacity = 60 caixes estadístiques (CE).** Per-SKU CE comes from `Caixes_Estadístiques.xlsx` (authoritative, delivered by mentor); fallback to ZM040 `ZCE` row (`Denominator / 100`); final fallback CE = 1.0 with warning. Verified mentor cases: caixa Damm 1/3 = 1.0 CE → 60 cases/pallet; Veri = 1.5 CE → 40 cases/pallet; barril 30 L = 4.0 CE → 15 barrels/pallet. See DR-010. |
+| A-32 | ✅ Locked 2026-05-09 | **Furgoneta (1 unit, 3 pallets in line)**: position 1 (deepest) is accessible *only* via lateral curtain (one side); positions 2 & 3 (middle and rear) are accessible *only* via rear doors and obey LIFO (P3 out before P2). |
+| A-33 | ✅ Locked 2026-05-09 | **6P (×11, 2×3) and 8P (×4, 2×4) trucks**: open *only* from the two side curtains, with a **central partition (reixa)**. Left-row pallets are reachable only from LEFT; right-row pallets only from RIGHT; no cross-row access; no rear access. Within a row, all pallets are equally reachable along the curtain length. |
+| A-34 | ✅ Locked 2026-05-09 | **8P + tail-lift variant (×4, 2×4)**: as A-33, *plus* rear doors with an `ascensor` (tail-lift). Slots are reachable from both their side curtain and from REAR (with rear-blocking adjacency: rearmost pallets unblock first). Modelled as the `TRUCK_8P_LIFT` profile in DR-008. |
+| A-35 | ✅ Locked 2026-05-09 | **Returns rate = 60 % flat global** (replaces the per-class A-07). Applied to outbound CE per stop. Pitch-only nuance: empirically lower in summer, higher in winter; we don't model seasonality in v1. |
 
 ---
 

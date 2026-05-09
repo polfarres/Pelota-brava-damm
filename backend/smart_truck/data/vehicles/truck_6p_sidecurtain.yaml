@@ -1,0 +1,86 @@
+# DR-008 / A-33 — 6-pallet rigid truck (×11 in fleet).
+#
+# Top view (LEFT curtain on top, RIGHT on bottom; central partition runs
+# the full length so cross-row access is blocked):
+#
+#       LEFT curtain  ↓
+#       +------+------+------+
+#       | P1   | P3   | P5   |   reachable_from = [LEFT]
+#       +======+======+======+   <-- central partition (reixa)
+#       | P2   | P4   | P6   |   reachable_from = [RIGHT]
+#       +------+------+------+
+#       RIGHT curtain ↑
+#
+# No rear access. Within a side, all pallets are equally reachable along
+# the curtain length, so blocked_by_per_face is empty.
+
+profile_id: TRUCK_6P_SC
+display_name: "Camió 6 palets cortina lateral (partició central)"
+fleet_count: 11
+external_dim_cm: [780, 250, 330]
+internal_dim_cm: [620, 240, 240]
+access:
+  rear_doors: false
+  rear_lift: false
+  curtain: BOTH_SIDES_PARTITIONED
+  partition: true
+slots:
+  - id: P1
+    type: PALLET_FLOOR
+    pos_cm: [0, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P3
+    type: PALLET_FLOOR
+    pos_cm: [200, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P5
+    type: PALLET_FLOOR
+    pos_cm: [400, 0, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [LEFT]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P2
+    type: PALLET_FLOOR
+    pos_cm: [0, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P4
+    type: PALLET_FLOOR
+    pos_cm: [200, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+  - id: P6
+    type: PALLET_FLOOR
+    pos_cm: [400, 120, 0]
+    size_cm: [120, 80, 180]
+    accepts: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+    capacity_ce: 60.0
+    max_weight_kg: 900
+    reachable_from: [RIGHT]
+    can_host_returns_of: [EUR_PALLET, INDUSTRIAL_PALLET, BRL, CASE]
+total_capacity_ce: 360.0
+nominal_payload_kg: 5500.0
+envase_zone_slot_ids: [P5, P6]
+lifo_order_per_face: {}
+schema_version: "1.1"
