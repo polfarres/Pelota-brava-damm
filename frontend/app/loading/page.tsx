@@ -173,7 +173,8 @@ function buildLoadingSteps(plan: Plan): LoadStep[] {
 
 export default function LoadingPage() {
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
-  const [activeStep, setActiveStep] = useState(0);
+  // -1 = initial state (empty truck, no step done yet). Steps go 0..N-1.
+  const [activeStep, setActiveStep] = useState(-1);
   const [apiOk, setApiOk] = useState<'pending' | 'ok' | 'fallback'>('pending');
 
   useEffect(() => {
@@ -194,23 +195,41 @@ export default function LoadingPage() {
   const steps = useMemo(() => buildLoadingSteps(plan), [plan]);
   const totalSteps = steps.length;
 
-  const { loadedLayerKeys, loadedFullSlots } = useMemo(() => {
-    const layers = new Set<string>();
-    const fullSlots = new Set<string>();
+  // Per-slot cell counter: each completed step adds round(step.totalCe)
+  // cells to its slot (capped at 60 = TOTAL_CELLS). Cells are filled
+  // in load order (bottom-back → top-front), so subsequent steps for
+  // the same slot extend the visible pile incrementally.
+  const loadedCellsPerSlot = useMemo(() => {
+    const counts = new Map<string, number>();
     for (let i = 0; i <= activeStep; i++) {
       const s = steps[i];
       if (!s) continue;
-      if (s.customer_id == null) {
-        // Whole-pallet step — covers staples and aggregated barrel pallets.
-        fullSlots.add(s.slotId);
-      } else if (s.stop_sequence != null) {
-        layers.add(`${s.slotId}::${s.stop_sequence}`);
-      }
+      const add = Math.max(1, Math.min(60, Math.round(s.totalCe)));
+      counts.set(s.slotId, Math.min(60, (counts.get(s.slotId) ?? 0) + add));
     }
-    return { loadedLayerKeys: layers, loadedFullSlots: fullSlots };
+    return counts;
   }, [steps, activeStep]);
 
-  const currentStep = steps[activeStep];
+  // A slot counts as "fully loaded" when we've put in at least round(sum
+  // totalCe of all its steps) cells. Used by the counter chip.
+  const slotFullCellsTarget = useMemo(() => {
+    const target = new Map<string, number>();
+    for (const s of steps) {
+      const add = Math.max(1, Math.min(60, Math.round(s.totalCe)));
+      target.set(s.slotId, Math.min(60, (target.get(s.slotId) ?? 0) + add));
+    }
+    return target;
+  }, [steps]);
+
+  const slotsFullyLoaded = useMemo(() => {
+    let n = 0;
+    for (const [slotId, target] of slotFullCellsTarget) {
+      if ((loadedCellsPerSlot.get(slotId) ?? 0) >= target) n++;
+    }
+    return n;
+  }, [loadedCellsPerSlot, slotFullCellsTarget]);
+
+  const currentStep = activeStep >= 0 ? steps[activeStep] : null;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -244,23 +263,27 @@ export default function LoadingPage() {
           </div>
           <TruckScene3D
             plan={plan}
-            loadedLayerKeys={loadedLayerKeys}
-            loadedFullSlots={loadedFullSlots}
+            loadedCellsPerSlot={loadedCellsPerSlot}
             currentSlotId={currentStep?.slotId ?? null}
           />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <Counter label="Pas" value={`${activeStep + 1} / ${totalSteps}`} />
+            <Counter
+              label="Pas"
+              value={
+                activeStep < 0
+                  ? `Camió buit · 0 / ${totalSteps}`
+                  : `${activeStep + 1} / ${totalSteps}`
+              }
+            />
             <Counter
               label="Palets ja carregats"
-              value={`${new Set(steps.slice(0, activeStep + 1).map((s) => s.slotId)).size} / ${
-                new Set(steps.map((s) => s.slotId)).size
-              }`}
+              value={`${slotsFullyLoaded} / ${slotFullCellsTarget.size}`}
             />
           </div>
           <div className="mt-3">
             <input
               type="range"
-              min={0}
+              min={-1}
               max={Math.max(0, totalSteps - 1)}
               value={activeStep}
               onChange={(e) => setActiveStep(Number(e.target.value))}
@@ -269,8 +292,8 @@ export default function LoadingPage() {
             <div className="flex gap-2 mt-2">
               <button
                 className="text-xs bg-damm-dark text-white px-3 py-1.5 rounded disabled:opacity-40"
-                onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
-                disabled={activeStep === 0}
+                onClick={() => setActiveStep((s) => Math.max(-1, s - 1))}
+                disabled={activeStep <= -1}
               >
                 ← Anterior
               </button>
@@ -280,6 +303,13 @@ export default function LoadingPage() {
                 disabled={activeStep >= totalSteps - 1}
               >
                 Següent →
+              </button>
+              <button
+                className="text-xs bg-gray-200 text-gray-700 px-3 py-1.5 rounded ml-auto"
+                onClick={() => setActiveStep(-1)}
+                title="Reinicia: camió buit"
+              >
+                ⟲
               </button>
             </div>
           </div>
@@ -293,7 +323,7 @@ export default function LoadingPage() {
               step={s}
               index={i}
               active={i === activeStep}
-              done={i < activeStep}
+              done={i <= activeStep - 1}
               onClick={() => setActiveStep(i)}
             />
           ))}

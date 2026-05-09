@@ -15,12 +15,11 @@ import type { Plan, StackLayer } from '@/lib/types';
 
 interface Props {
   plan: Plan;
-  // Set of "loaded" layers, identified by `${slotId}::${stop_sequence}`.
-  loadedLayerKeys: Set<string>;
-  // Set of "loaded" whole-pallet slots — covers staples AND aggregated
-  // barrel/non-staple pallets where per-layer rounding zeroed out
-  // every layer (so the picker loads the slot in one warehouse wave).
-  loadedFullSlots: Set<string>;
+  // Per-slot count of cells already loaded. The first N cells of each
+  // slot's `buildPalletCells()` output are rendered. This makes the
+  // 3D fill update incrementally as the picker advances through
+  // steps — each step adds round(step.totalCe) cells.
+  loadedCellsPerSlot: Map<string, number>;
   // Slot currently being filled (highlighted).
   currentSlotId: string | null;
 }
@@ -36,8 +35,7 @@ function isStapleSlot(pa: { lines: { sku: string }[] } | undefined): boolean {
 
 export default function TruckScene3D({
   plan,
-  loadedLayerKeys,
-  loadedFullSlots,
+  loadedCellsPerSlot,
   currentSlotId,
 }: Props) {
   const grid = plan.vehicle;
@@ -137,13 +135,12 @@ export default function TruckScene3D({
                 </mesh>
               )}
 
-              {/* Stack: render each layer that's been "loaded" so far */}
+              {/* Stack: render the first N cells based on loaded count */}
               <PalletStack
                 slotId={slotId}
                 stack={stack}
                 isStaple={staple}
-                loadedLayerKeys={loadedLayerKeys}
-                loadedFull={loadedFullSlots.has(slotId)}
+                loadedCells={loadedCellsPerSlot.get(slotId) ?? 0}
                 width={palletWidth - 0.2}
                 depth={palletDepth - 0.2}
                 cargoHeight={cargoHeight - 0.3}
@@ -337,8 +334,7 @@ function PalletStack({
   slotId,
   stack,
   isStaple,
-  loadedLayerKeys,
-  loadedFull,
+  loadedCells,
   width,
   depth,
   cargoHeight,
@@ -346,8 +342,7 @@ function PalletStack({
   slotId: string;
   stack: StackLayer[];
   isStaple: boolean;
-  loadedLayerKeys: Set<string>;
-  loadedFull: boolean;
+  loadedCells: number;
   width: number;
   depth: number;
   cargoHeight: number;
@@ -358,12 +353,11 @@ function PalletStack({
 
   const cells = useMemo(() => buildPalletCells(slotId, stack), [slotId, stack]);
 
-  // Decide which cells to render:
-  // - loadedFull → all cells of this slot (whole-pallet wave done).
-  // - loadedLayerKeys → cells belonging to that specific layer (LIFO).
-  const visibleCells = cells.filter(
-    (c) => loadedFull || loadedLayerKeys.has(c.layerKey),
-  );
+  // Render the first N cells in LIFO load order (bottom-back → top-front).
+  const visibleCells = cells.slice(0, Math.min(cells.length, Math.max(0, loadedCells)));
+
+  // Staple star floats once the column is *fully* loaded.
+  const stapleFullyLoaded = isStaple && visibleCells.length >= cells.length && cells.length > 0;
 
   return (
     <group>
@@ -388,8 +382,7 @@ function PalletStack({
           </mesh>
         );
       })}
-      {/* Staple star marker — appears once any cell is loaded. */}
-      {isStaple && loadedFull && (
+      {stapleFullyLoaded && (
         <mesh position={[0, palletTop + cargoHeight - 0.05, 0]}>
           <sphereGeometry args={[0.12, 16, 16]} />
           <meshStandardMaterial color="#E30613" emissive="#E30613" emissiveIntensity={0.5} />
