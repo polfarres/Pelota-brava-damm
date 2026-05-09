@@ -209,7 +209,10 @@
     2.2636249
   ],
   "CALLE MAJOR 11, 08160, MONTMELO, Spain": null,
-  "CALLE MAJOR 12, 08519, FOLGUEROLES, Spain": null,
+  "CALLE MAJOR 12, 08519, FOLGUEROLES, Spain": [
+    41.9396,
+    2.3201
+  ],
   "CALLE MAJOR 33, 08505, SANTA EULÀLIA DE RIUPRIMER, Spain": [
     41.9111046,
     2.1897552
@@ -371,8 +374,8 @@
   ],
   "CARRETERA MONTMELO 120, 08403, GRANOLLERS, Spain": null,
   "CARRETERA N-141 D S/N, 08506, CALLDETENES, Spain": [
-    41.9584516,
-    2.6485803
+    41.9242,
+    2.2920
   ],
   "CARRETERA OLOT 58, 08560, MANLLEU, Spain": [
     42.003834,
@@ -696,8 +699,8 @@
     2.2439866
   ],
   "Plaça Mossen Cinto Verdaguer 3, 08519, FOLGUEROLES, Spain": [
-    41.2189877,
-    1.7234661
+    41.9405,
+    2.3193
   ],
   "Plaça de Fra Bernadí 23, 08560, MANLLEU, Spain": [
     42.0000201,
