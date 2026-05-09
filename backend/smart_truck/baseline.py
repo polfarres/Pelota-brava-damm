@@ -39,12 +39,13 @@ import pandas as pd
 
 from .models import (
     BaselinePlan,
+    DeliveredLine,
     PaymentCondition,
     SlotAssignment,
     StopPlan,
     VehicleProfileName,
 )
-from .paperwork.parser import HojaCarga, HojaRuta, parse_hoja_carga, parse_hoja_ruta
+from .paperwork.parser import HojaCarga, HojaCargaLine, HojaRuta, parse_hoja_carga, parse_hoja_ruta
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
@@ -91,7 +92,7 @@ def reconstruct_baseline(
         )
 
     stops = _build_stops(hr, hc, inputs)
-    slots = _build_baseline_slots(hc)
+    slots = _build_baseline_slots(hc, inputs)
 
     return BaselinePlan(
         ruta=hc.ruta,
@@ -200,7 +201,7 @@ def _parse_time(s: object) -> time:
 # ---------------------------------------------------------------------------
 
 
-def _build_baseline_slots(hc: HojaCarga) -> list[SlotAssignment]:
+def _build_baseline_slots(hc: HojaCarga, inputs: BaselineInputs) -> list[SlotAssignment]:
     """In the baseline the truck is loaded the way the picker walks the
     warehouse: by ``Ubicación`` in lex order. We materialise one logical
     slot per distinct ``Ubicación`` for outbound items, plus a single
@@ -208,12 +209,29 @@ def _build_baseline_slots(hc: HojaCarga) -> list[SlotAssignment]:
 
     These don't map 1:1 onto the truck's physical pallet positions —
     that's by design: the baseline pre-dates the hybrid load model. The
-    KPI engine reads ``len(slots)`` to compute the baseline's
-    *implicit* zone count and uses ``stop.in_truck_zones_touched`` for
-    the per-stop delta.
+    frontend's "Original (DDIDGP)" view of the Smart Hoja Carga renders
+    these slots' ``contents`` directly so the picker can see the as-is
+    paperwork side-by-side with the Smart version.
     """
-    by_ubic: dict[str, list] = {}
-    envase_lines: list = []
+    ce_per_unit = (
+        inputs.products.set_index("sku")["ce_per_unit"].to_dict()
+        if "ce_per_unit" in inputs.products.columns
+        else {}
+    )
+
+    def _to_delivered(ln: HojaCargaLine) -> DeliveredLine:
+        return DeliveredLine(
+            sku=ln.sku,
+            description=ln.description,
+            quantity=ln.quantity,
+            unit=ln.unit,
+            ce=float(ce_per_unit.get(ln.sku, 1.0)),
+            weight_kg=0.0,
+            source_ubicacion=ln.ubicacion,
+        )
+
+    by_ubic: dict[str, list[HojaCargaLine]] = {}
+    envase_lines: list[HojaCargaLine] = []
 
     for ln in hc.lines:
         if ln.section == "envases":
@@ -228,23 +246,27 @@ def _build_baseline_slots(hc: HojaCarga) -> list[SlotAssignment]:
 
     slots: list[SlotAssignment] = []
     for ubic in sorted(by_ubic):
+        contents = [_to_delivered(ln) for ln in by_ubic[ubic]]
+        ce_used = sum(c.ce * c.quantity for c in contents)
         slots.append(
             SlotAssignment(
                 slot_id=f"baseline-{ubic}",
                 is_envase_zone=False,
                 stop_sequences=[],  # no per-stop attribution available in v1
-                contents=[],
-                ce_used=0.0,
+                contents=contents,
+                ce_used=ce_used,
             )
         )
     if envase_lines:
+        contents = [_to_delivered(ln) for ln in envase_lines]
+        ce_used = sum(c.ce * c.quantity for c in contents)
         slots.append(
             SlotAssignment(
                 slot_id="baseline-envases",
                 is_envase_zone=True,
                 stop_sequences=[],
-                contents=[],
-                ce_used=0.0,
+                contents=contents,
+                ce_used=ce_used,
             )
         )
     return slots
