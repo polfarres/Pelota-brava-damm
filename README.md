@@ -40,7 +40,8 @@ frontend/                     # Next.js + Tailwind + Leaflet + react-three-fiber
 cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m smart_truck.data.load                     # generate parquet files
+python -m smart_truck.data.load                     # generate parquet
+python -m smart_truck.data.geocode --route DR0027   # restore lat/lon (cache hits)
 uvicorn smart_truck.api:app --reload                # http://localhost:8000
 
 # Frontend (in another shell)
@@ -48,6 +49,18 @@ cd frontend
 npm install
 npm run dev                                         # http://localhost:3000
 ```
+
+### One-shot demo
+
+After backend setup, produce every pitch artefact in one command:
+
+```bash
+python -m smart_truck.demo                          # → data/demo_output/
+```
+
+This reconstructs the baseline plan from the source paperwork, optionally
+runs the optimiser when available, and emits the Smart Hoja Carga +
+Smart Hoja Ruta PDFs ready to print as pitch props.
 
 ## Demo target
 

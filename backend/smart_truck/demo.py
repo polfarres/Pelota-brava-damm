@@ -168,8 +168,12 @@ def main() -> int:
         ruta_out = OUTPUT_DIR / f"smart_hoja_ruta_{args.route}_{args.fecha}.pdf"
         emit_smart_hoja_carga(hc, plan=plan, output_path=carga_out)
         emit_smart_hoja_ruta(hr, plan=plan, output_path=ruta_out)
-        print(f"      {carga_out.relative_to(REPO_ROOT)} ({carga_out.stat().st_size:,} bytes)")
-        print(f"      {ruta_out.relative_to(REPO_ROOT)} ({ruta_out.stat().st_size:,} bytes)")
+        for path in (carga_out, ruta_out):
+            try:
+                shown = path.relative_to(REPO_ROOT)
+            except ValueError:
+                shown = path  # output dir lives outside the repo (e.g. test tmp_path)
+            print(f"      {shown} ({path.stat().st_size:,} bytes)")
     print()
 
     print("Done.")
