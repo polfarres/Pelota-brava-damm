@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 import pandas as pd
@@ -30,6 +32,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .baseline import RECURSOS_DIR, BaselineInputs, reconstruct_baseline
+from .paperwork.emitter import emit_smart_hoja_carga, emit_smart_hoja_ruta
+from .paperwork.parser import parse_hoja_carga, parse_hoja_ruta
+
+# Map a run_id to the source PDFs we'll emit a Smart variant of.
+# Today: only one demo carga is wired. Future: the Plan store yields
+# the source PDFs and a Plan together.
+_KNOWN_CARGAS: dict[str, tuple[Path, Path]] = {
+    "DR0027-2026-05-08": (
+        RECURSOS_DIR / "Hoja Carga.pdf",
+        RECURSOS_DIR / "Hoja Ruta.pdf",
+    ),
+}
 
 app = FastAPI(title="Smart Truck", version="0.1.0")
 
@@ -144,13 +158,56 @@ def post_plan(_req: PlanRequest) -> dict[str, Any]:
     )
 
 
+def _emit_via_tempfile(emitter, source, plan) -> bytes:
+    """Run a paperwork emitter into a temp file and return its bytes."""
+    with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        out_path = Path(tmp.name)
+    try:
+        emitter(source, plan=plan, output_path=out_path)
+        return out_path.read_bytes()
+    finally:
+        out_path.unlink(missing_ok=True)
+
+
 @app.get("/plan/{run_id}/hoja-carga.pdf")
-def get_smart_hoja_carga(run_id: str) -> Response:  # noqa: ARG001 - placeholder
-    """Smart Hoja Carga PDF (FR-010). Stub until the emitter ships."""
-    raise HTTPException(status_code=501, detail="Smart Hoja Carga emitter pending (FR-010).")
+def get_smart_hoja_carga(run_id: str) -> Response:
+    """Smart Hoja Carga PDF (FR-010).
+
+    Until Track A's Plan store lands we operate in pass-through mode: a
+    known ``run_id`` resolves to source PDFs and we emit a Smart Hoja
+    Carga where the layout matches DDIDGP but the ``Descarga`` column
+    stays blank (because there's no Plan to fill it from yet).
+
+    ``run_id`` format: ``{ruta}-{fecha}`` (ISO date), e.g.
+    ``DR0027-2026-05-08``.
+    """
+    if run_id not in _KNOWN_CARGAS:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"unknown run_id {run_id!r}. Today only "
+                f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
+            ),
+        )
+    carga_pdf, _ = _KNOWN_CARGAS[run_id]
+    source = parse_hoja_carga(carga_pdf)
+    pdf = _emit_via_tempfile(emit_smart_hoja_carga, source, plan=None)
+    return Response(content=pdf, media_type="application/pdf")
 
 
 @app.get("/plan/{run_id}/hoja-ruta.pdf")
-def get_smart_hoja_ruta(run_id: str) -> Response:  # noqa: ARG001 - placeholder
-    """Smart Hoja Ruta PDF (FR-011). Stub until the emitter ships."""
-    raise HTTPException(status_code=501, detail="Smart Hoja Ruta emitter pending (FR-011).")
+def get_smart_hoja_ruta(run_id: str) -> Response:
+    """Smart Hoja Ruta PDF (FR-011). Pass-through mode like
+    ``hoja-carga.pdf`` until the optimiser is in."""
+    if run_id not in _KNOWN_CARGAS:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"unknown run_id {run_id!r}. Today only "
+                f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
+            ),
+        )
+    _, ruta_pdf = _KNOWN_CARGAS[run_id]
+    source = parse_hoja_ruta(ruta_pdf)
+    pdf = _emit_via_tempfile(emit_smart_hoja_ruta, source, plan=None)
+    return Response(content=pdf, media_type="application/pdf")

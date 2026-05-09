@@ -73,11 +73,35 @@ def test_post_plan_stub_returns_501(client: TestClient) -> None:
     assert r.status_code == 501
 
 
-def test_smart_carga_pdf_stub_returns_501(client: TestClient) -> None:
+def test_smart_carga_pdf_unknown_run_id_404(client: TestClient) -> None:
     r = client.get("/plan/abc/hoja-carga.pdf")
-    assert r.status_code == 501
+    assert r.status_code == 404
 
 
-def test_smart_ruta_pdf_stub_returns_501(client: TestClient) -> None:
+def test_smart_ruta_pdf_unknown_run_id_404(client: TestClient) -> None:
     r = client.get("/plan/abc/hoja-ruta.pdf")
-    assert r.status_code == 501
+    assert r.status_code == 404
+
+
+@pytest.mark.skipif(
+    not (RECURSOS / "Hoja Carga.pdf").exists(),
+    reason="Sample PDFs not present.",
+)
+def test_smart_carga_pdf_known_run_id_returns_pdf(client: TestClient) -> None:
+    r = client.get("/plan/DR0027-2026-05-08/hoja-carga.pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:5] == b"%PDF-"
+    assert len(r.content) > 1000
+
+
+@pytest.mark.skipif(
+    not (RECURSOS / "Hoja Ruta.pdf").exists(),
+    reason="Sample PDFs not present.",
+)
+def test_smart_ruta_pdf_known_run_id_returns_pdf(client: TestClient) -> None:
+    r = client.get("/plan/DR0027-2026-05-08/hoja-ruta.pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:5] == b"%PDF-"
+    assert len(r.content) > 500
