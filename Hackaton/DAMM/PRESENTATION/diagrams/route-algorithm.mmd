@@ -1,0 +1,43 @@
+---
+title: Algorisme de Ruta · Smart Truck
+config:
+  theme: base
+  themeVariables:
+    fontFamily: 'Helvetica, Arial, sans-serif'
+    fontSize: '15px'
+    primaryColor: '#ffffff'
+    primaryTextColor: '#1A1A1A'
+    primaryBorderColor: '#1A1A1A'
+    lineColor: '#1A1A1A'
+---
+flowchart TD
+    classDef input fill:#E0F2FE,stroke:#0284C7,color:#075985,stroke-width:2px,font-weight:bold
+    classDef step fill:#ffffff,stroke:#1A1A1A,color:#1A1A1A,stroke-width:1.5px
+    classDef key fill:#FEE2E2,stroke:#E30613,color:#991B1B,stroke-width:3px,font-weight:bold
+    classDef fallback fill:#F3F4F6,stroke:#6B7280,color:#4B5563,stroke-width:1.5px,stroke-dasharray:5
+    classDef output fill:#D1FAE5,stroke:#059669,color:#065F46,stroke-width:2px,font-weight:bold
+
+    IN[/"<b>ENTRADA</b><br/>15 parades amb lat/lon<br/>Finestres horàries<br/>Capacitat camió (CE)<br/>Ordre baseline (SAP)"/]:::input
+
+    IN --> M["<b>1.</b> Construeix matriu N×N<br/>distància + temps"]:::step
+
+    M --> OSRM{"<b>OSRM /table</b><br/>routing real per carretera"}:::key
+    OSRM -- "✓ disponible" --> KM["km i minuts<br/>seguint la xarxa real"]:::step
+    OSRM -- "× sense xarxa" --> HV["Haversine × 1.4<br/>velocitat 25 km/h"]:::fallback
+
+    KM --> PEN
+    HV --> PEN
+    PEN["<b>2.</b> Matriu de penalització<br/>familiaritat (A-12)"]:::step
+
+    PEN --> COST["<b>3.</b> Cost = distància + penalització"]:::step
+
+    COST --> SOLVER{"<b>OR-Tools</b><br/>VRP-TW · 30s<br/>capacitat + finestres"}:::key
+    SOLVER -- "✓ solució" --> SEQ
+    SOLVER -- "× timeout" --> HEUR["Nearest-Neighbour<br/>+ 2-opt"]:::fallback
+    HEUR --> SEQ
+
+    SEQ["<b>4.</b> Re-seqüencia parades<br/>+ calcula ETAs"]:::step
+
+    SEQ --> GEOM["<b>5.</b> OSRM /route<br/>polilínia per al mapa"]:::step
+
+    GEOM --> OUT[/"<b>SORTIDA</b><br/>Ordre òptim de parades<br/>ETA per parada<br/>Polilínia (3.000 punts)"/]:::output

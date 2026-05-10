@@ -1,0 +1,42 @@
+---
+title: Algorisme de Càrrega · Smart Truck
+config:
+  theme: base
+  themeVariables:
+    fontFamily: 'Helvetica, Arial, sans-serif'
+    fontSize: '15px'
+    primaryColor: '#ffffff'
+    primaryTextColor: '#1A1A1A'
+    primaryBorderColor: '#1A1A1A'
+    lineColor: '#1A1A1A'
+---
+flowchart TD
+    classDef input fill:#E0F2FE,stroke:#0284C7,color:#075985,stroke-width:2px,font-weight:bold
+    classDef step fill:#ffffff,stroke:#1A1A1A,color:#1A1A1A,stroke-width:1.5px
+    classDef key fill:#FEE2E2,stroke:#E30613,color:#991B1B,stroke-width:3px,font-weight:bold
+    classDef fallback fill:#F3F4F6,stroke:#6B7280,color:#4B5563,stroke-width:1.5px,stroke-dasharray:5
+    classDef output fill:#D1FAE5,stroke:#059669,color:#065F46,stroke-width:2px,font-weight:bold
+    classDef phase fill:#FFF7ED,stroke:#EA580C,color:#9A3412,stroke-width:2px
+
+    IN[/"<b>ENTRADA</b><br/>Demanda per parada<br/>(SKU · qty · unitat)<br/>Perfil del vehicle"/]:::input
+
+    IN --> P0["<b>FASE 0</b> · Extreu STAPLES<br/>SKUs universals: ED13 + CJ13<br/>(Cicle Estrella 1/3)"]:::key
+
+    P0 --> P1["<b>FASE 1-2</b> · Pressupost<br/>N_case = ⌈Σ CE_case / 60⌉<br/>N_barrel = ⌈Σ CE_barrel / 60⌉"]:::step
+
+    P1 --> P3["<b>FASE 3</b> · Tipus per slot<br/>CASE / BARREL (A-37)<br/>Barrils a posicions accessibles"]:::step
+
+    P3 --> P4{"<b>FASE 4</b> · MILP<br/>client → palet · CBC 10s<br/>min Σ (seq_max - seq_min)"}:::key
+    P4 -- "✓ òptim" --> P5
+    P4 -- "× timeout" --> HEUR["Reverse-Greedy<br/>(últim client primer)"]:::fallback
+    HEUR --> P5
+
+    P5["<b>FASE 5</b> · Stack TOP→BOTTOM<br/>1a parada DALT, última BAIX (A-38)<br/>+ columna staple a P1"]:::step
+
+    P5 --> P6["<b>FASE 6</b> · verify_access<br/>cap blocker no retarda<br/>la primera entrega"]:::step
+
+    P6 --> P65["<b>FASE 6.5</b> · Rebalanç al magatzem<br/>fusiona palets parcials < 30 CE<br/>(només a la càrrega inicial)"]:::step
+
+    P65 --> P7["<b>FASE 7</b> · Estimació<br/>minuts de conductor<br/>= base + obertures + rotacions"]:::step
+
+    P7 --> OUT[/"<b>SORTIDA</b><br/>Pla de càrrega del camió<br/>(SlotAssignments)<br/>Capacitat real → al VRP"/]:::output
