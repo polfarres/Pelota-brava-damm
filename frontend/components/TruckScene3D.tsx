@@ -350,47 +350,25 @@ function PalletStack({
   const total = cells.length;
   const visibleCount = Math.min(visibleCells.length, total);
 
-  // Compute "visible-cell-index" for each cell using its position in the
-  // backend's load order (cells array). The visible cells are a subset
-  // (by ubicacion picked), so we need to find their index within `cells`.
-  const visibleIndexSet = useMemo(() => {
-    const set = new Set<number>();
-    if (visibleCells.length === 0) return set;
-    // Track how many of each (sku) have been claimed, since the visible
-    // list is unordered; match each visible cell against the first not-
-    // yet-claimed cell in the canonical list with the same sku.
-    const claimed = new Set<number>();
-    for (const v of visibleCells) {
-      for (let i = 0; i < cells.length; i++) {
-        if (claimed.has(i)) continue;
-        if (cells[i].sku === v.sku) {
-          claimed.add(i);
-          set.add(i);
-          break;
-        }
-      }
-    }
-    return set;
-  }, [cells, visibleCells]);
-
+  // Gravity: cells stack bottom-up from position 0 onwards. As the picker
+  // works through Ubicacions (in lex order, not necessarily load order),
+  // each newly-picked cell takes the next free position above the
+  // already-loaded ones — never floating gaps. The price is that a cell's
+  // *position* no longer maps 1:1 to its canonical LIFO destination
+  // (a later-picked cell may sit physically below its destined customer).
+  // The picker uses a worktable to buffer until the slot can be loaded
+  // bottom-up correctly; the visualisation just shows the running total.
   const meshes: React.ReactNode[] = [];
 
   if (isBarrelSlot) {
-    // Render every group of ~4 cells as one cylinder (each CE-bundle of 4).
-    // Use the canonical cells array; show only the first N cylinders that
-    // correspond to visible cells.
-    const totalCylinders = Math.min(
-      Math.ceil(total / 4),
+    // 4 CE per barrel → group visible cells into 4-cell bundles, render
+    // one cylinder per bundle. 3 cylinders per level × 6 levels = 18 max.
+    const visibleCylinders = Math.min(
+      Math.ceil(visibleCount / 4),
       PALLET_LEVELS * BARRELS_PER_LEVEL,
     );
-    const visibleCylinders = Math.min(
-      totalCylinders,
-      Math.ceil(visibleCount / 4),
-    );
     for (let bi = 0; bi < visibleCylinders; bi++) {
-      // Take the dominant SKU of the cells in this 4-CE bundle.
-      const bundleStart = bi * 4;
-      const bundleCell = cells[bundleStart] ?? cells[0];
+      const bundleCell = visibleCells[bi * 4] ?? visibleCells[0];
       const { pos, radius, height } = barrelTransform(
         bi,
         depth,
@@ -404,7 +382,6 @@ function PalletStack({
           <meshStandardMaterial color={colorForSku(bundleCell.sku)} />
         </mesh>,
       );
-      // Top rim accent (looks like a metal barrel top)
       meshes.push(
         <mesh
           key={`${slotId}-bt${bi}`}
@@ -417,9 +394,8 @@ function PalletStack({
     }
   } else {
     // CASE pallet: cube cells in a 4+4+2 grid, 10 per level × 6 levels.
-    for (let i = 0; i < total; i++) {
-      if (!visibleIndexSet.has(i)) continue;
-      const cell = cells[i];
+    for (let i = 0; i < visibleCount; i++) {
+      const cell = visibleCells[i];
       const level = Math.floor(i / CELLS_PER_LEVEL);
       const cellInLevel = i % CELLS_PER_LEVEL;
       const { pos, size } = cellTransform(level, cellInLevel, depth, width, cellHeight, palletTop);
