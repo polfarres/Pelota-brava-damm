@@ -175,14 +175,20 @@ def _build_stop_demands_from_paperwork(
 ) -> tuple[list[StopDemand], list[Any]]:
     """Use the parsed Hoja Carga + Hoja Ruta PDFs as the demand source.
 
-    Hoja Ruta gives us the customer order. Hoja Carga gives us SKU lines
-    aggregated for the whole truck (no per-customer split). We allocate
-    each SKU line proportionally across stops by their proforma totals.
+    Hoja Ruta gives us the customer order. For DR0027 / 2026-05-08
+    (the demo carga) we route the per-customer attribution through the
+    hand-curated fixture in :mod:`demo_fixture`, which guarantees
+    integer quantities and intact barrels (no fractional units the
+    picker can't act on). For any other demo paperwork the original
+    proportional split applies.
 
-    Returns (stops, hoja_ruta_stops). Used for the demo carga only when
-    the parquet doesn't have data for that day.
+    Returns ``(stops, hoja_ruta_stops)``.
     """
     from smart_truck.paperwork.parser import parse_hoja_carga, parse_hoja_ruta
+    from smart_truck.optimize.demo_fixture import (
+        build_demo_per_customer_lines,
+        is_demo,
+    )
 
     if not HOJA_CARGA_PDF.exists() or not HOJA_RUTA_PDF.exists():
         return [], []
@@ -190,12 +196,8 @@ def _build_stop_demands_from_paperwork(
     hc = parse_hoja_carga(HOJA_CARGA_PDF)
     hr = parse_hoja_ruta(HOJA_RUTA_PDF)
     if hc.ruta != ruta or hr.fecha != fecha:
-        # Different demo paperwork; bail.
         if hc.ruta != ruta or hc.fecha != fecha:
             return [], []
-
-    ce_map = _ce_per_unit_map()
-    desc_map = _description_map()
 
     # Dedup stops by customer_id, preserving order of first appearance.
     seen: set[int] = set()
@@ -209,7 +211,42 @@ def _build_stop_demands_from_paperwork(
     if not ordered_customers:
         return [], []
 
-    # Aggregate Hoja Carga lines by SKU (across "lleno" sections).
+    # ----- Demo path: integer fixture (DR0027 / 2026-05-08) -----
+    if is_demo(ruta, fecha):
+        weights = [
+            (s.customer_id, float(s.proforma_total) if s.proforma_total > 0 else 0.0)
+            for s in ordered_customers
+        ]
+        per_customer = build_demo_per_customer_lines(weights)
+
+        stops: list[StopDemand] = []
+        for i, customer in enumerate(ordered_customers):
+            line_dicts = per_customer.get(customer.customer_id, [])
+            lines = [
+                DeliveredLine(
+                    sku=ld["sku"],
+                    description=ld["description"],
+                    quantity=ld["quantity"],
+                    unit=ld["unit"],
+                    ce=ld["ce"],
+                    weight_kg=0.0,
+                    source_ubicacion=ld["source_ubicacion"],
+                )
+                for ld in line_dicts
+            ]
+            stops.append(
+                StopDemand(
+                    sequence=i + 1,
+                    customer_id=customer.customer_id,
+                    lines=lines,
+                )
+            )
+        return stops, ordered_customers
+
+    # ----- Generic path: proportional split with float quantities -----
+    ce_map = _ce_per_unit_map()
+    desc_map = _description_map()
+
     agg: dict[str, dict[str, Any]] = {}
     for ln in hc.lines:
         if ln.section in ("envases", "retorno"):
@@ -229,23 +266,19 @@ def _build_stop_demands_from_paperwork(
         else:
             existing["quantity"] += ln.quantity
 
-    # Allocate quantities proportionally across customers by their
-    # proforma totals (positive only — abonos/credit-notes don't pull
-    # full pallets). If totals are degenerate, split evenly.
-    weights = []
+    weights_f: list[float] = []
     for s in ordered_customers:
         w = float(s.proforma_total) if s.proforma_total > 0 else 0.0
-        weights.append(w)
-    total_w = sum(weights)
+        weights_f.append(w)
+    total_w = sum(weights_f)
     if total_w <= 0:
-        weights = [1.0] * len(ordered_customers)
+        weights_f = [1.0] * len(ordered_customers)
         total_w = float(len(ordered_customers))
 
-    # Build stops. Allocate each SKU's quantity proportional to weights.
-    stops: list[StopDemand] = []
+    stops = []
     for i, customer in enumerate(ordered_customers):
-        share = weights[i] / total_w
-        lines: list[DeliveredLine] = []
+        share = weights_f[i] / total_w
+        lines = []
         for sku, info in agg.items():
             qty = info["quantity"] * share
             if qty < 1e-3:
