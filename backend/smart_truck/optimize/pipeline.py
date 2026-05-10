@@ -17,6 +17,7 @@ when the parquet doesn't have that exact day. This is the demo path.
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -454,21 +455,31 @@ def plan(
     OUTBOUND_ENVASE_TAX = 0.0  # set to e.g. 0.10 to reserve 10% of capacity
 
     # If demand exceeds capacity, scale every stop's line quantities
-    # uniformly to fit. This keeps the demo feasible when the recorded
-    # CE values run higher than the modelled vehicle capacity (DR-010 +
-    # A-31 are still being calibrated).
-    #
-    # Under A-37 the slot-count budget is per-type: ceil(case/60) +
-    # ceil(barrel/60). Each type's ceil() can waste up to 60 CE, so we
-    # leave 60 CE of head-room per type present in the carga to avoid
-    # tripping the packer's slot-count check after scaling.
+    # uniformly to fit. The check is slot-count based (per A-37 the
+    # packer needs ceil(case/60) + ceil(barrel/60) slots ≤ vehicle
+    # capacity) rather than raw-CE based. This avoids needlessly
+    # shrinking quantities when the carga already fits in the slot
+    # count exactly — which broke integer quantities in the demo.
     total_demand_ce = sum(s.ce_total for s in resequenced)
     effective_capacity = profile.total_capacity_ce * (1.0 - OUTBOUND_ENVASE_TAX)
-    has_case = any(any(l.unit not in {"Barril", "Tubo"} for l in s.lines) for s in resequenced)
-    has_barrel = any(any(l.unit in {"Barril", "Tubo"} for l in s.lines) for s in resequenced)
-    rounding_headroom = 60.0 * (int(has_case) + int(has_barrel))
-    safe_capacity = max(60.0, effective_capacity - rounding_headroom)
-    if total_demand_ce > safe_capacity:
+    case_ce = sum(
+        l.ce * l.quantity for s in resequenced for l in s.lines
+        if l.unit not in {"Barril", "Tubo"}
+    )
+    barrel_ce = sum(
+        l.ce * l.quantity for s in resequenced for l in s.lines
+        if l.unit in {"Barril", "Tubo"}
+    )
+    n_case_slots = math.ceil(case_ce / 60.0) if case_ce > 0 else 0
+    n_barrel_slots = math.ceil(barrel_ce / 60.0) if barrel_ce > 0 else 0
+    n_slots_needed = n_case_slots + n_barrel_slots
+    fits_by_slots = n_slots_needed <= len(profile.slots)
+    fits_by_ce = total_demand_ce <= effective_capacity
+    if (not fits_by_slots) or (not fits_by_ce):
+        # Compute a target safe capacity that respects both the slot
+        # count and the CE budget — but only kick in if we're truly
+        # over either constraint.
+        safe_capacity = max(60.0, effective_capacity * 0.95)
         scale = safe_capacity / total_demand_ce
         scaled: list[StopDemand] = []
         for s in resequenced:

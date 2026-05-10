@@ -45,28 +45,43 @@ class _DemoLine:
 
 
 DEMO_CARGA_LINES: tuple[_DemoLine, ...] = (
-    # Cases (CE = 1 each)
+    # Tier-1 staple: P1 column (35 CE, 1 cell each = 35 ED13 cases)
     _DemoLine("ED13",    35, "Caja",   "AA09A1", 1.0, "ESTRELLA DAMM 1/3 RET. PP"),
-    _DemoLine("ED15LN",  22, "Caja",   "AA08A1", 1.0, "ESTRELLA DAMM 1/5 LN"),
-    _DemoLine("VO13",    18, "Caja",   "AA07A1", 1.0, "VOLL-DAMM 1/3 RET."),
-    _DemoLine("VE11",    16, "Caja",   "AA11A1", 1.0, "AGUA VERI 1/1 VIDRIO RET."),
-    _DemoLine("VE12SP",   8, "Caja",   "EB03A1", 1.0, "AGUA VERI 1/2 PET CAJA 24U"),
-    _DemoLine("0LT0033", 11, "Caja",   "FA06A3", 1.0, "LETONA GRAN CREME PET 1,5L"),
-    _DemoLine("0AG0003", 12, "Caja",   "AC08A3", 1.0, "FONT D.OR NATURAL 1L RET 12U"),
-    _DemoLine("0RF0014",  9, "Caja",   "BA02A3", 1.0, "COCA COLA 33CL LATA 24U"),
-    _DemoLine("EC13",     7, "Caja",   "BA05A1", 1.0, "ESTRELLA DAMM SIN ALCOHOL 1/3"),
-    _DemoLine("FD13",     6, "Caja",   "AA06A1", 1.0, "FREE DAMM 1/3 RET."),
-    _DemoLine("FDT13",    6, "Caja",   "AA04A1", 1.0, "FREE DAMM TOSTADA 1/3 RET."),
-    # Barrels (4 CE) — go intact to specific customers
+
+    # Other DAMM beers — 1 CE each
+    _DemoLine("ED15LN",  28, "Caja",   "AA08A1", 1.0, "ESTRELLA DAMM 1/5 LN"),
+    _DemoLine("VO13",    25, "Caja",   "AA07A1", 1.0, "VOLL-DAMM 1/3 RET."),
+    _DemoLine("EC13",    12, "Caja",   "BA05A1", 1.0, "ESTRELLA DAMM SIN ALCOHOL 1/3"),
+    _DemoLine("FD13",    10, "Caja",   "AA06A1", 1.0, "FREE DAMM 1/3 RET."),
+    _DemoLine("FDT13",   10, "Caja",   "AA04A1", 1.0, "FREE DAMM TOSTADA 1/3 RET."),
+    _DemoLine("DL13",     8, "Caja",   "AA02A1", 1.0, "DAMM LEMON 1/3 RET. PP"),
+
+    # Aigües — 1 CE each
+    _DemoLine("VE11",    25, "Caja",   "AA11A1", 1.0, "AGUA VERI 1/1 VIDRIO RET."),
+    _DemoLine("VE12SP",  18, "Caja",   "EB03A1", 1.0, "AGUA VERI 1/2 PET CAJA 24U"),
+    _DemoLine("VE32SP",  14, "Caja",   "EB02A1", 1.0, "AGUA VERI 1,5L PET 12U"),
+    _DemoLine("0LT0033", 18, "Caja",   "FA06A3", 1.0, "LETONA GRAN CREME PET 1,5L"),
+
+    # Refrescos i altres — 1 CE each
+    _DemoLine("0AG0003", 22, "Caja",   "AC08A3", 1.0, "FONT D.OR NATURAL 1L RET 12U"),
+    _DemoLine("0AG0010", 14, "Caja",   "AC07A2", 1.0, "FONT D.OR NATURAL 8L RET 1U"),
+    _DemoLine("0RF0014", 16, "Caja",   "BA02A3", 1.0, "COCA COLA 33CL LATA 24U"),
+    _DemoLine("0AM4905",  6, "Caja",   "A0DISTRIDA", 1.0, "COCA COLA ZERO 1L RET 12U"),
+
+    # Barrels (4 CE each) — go intact to specific customers
     _DemoLine("ED30",     4, "Barril", "AA10A1", 4.0, "ESTRELLA DAMM BARRIL 30"),
     _DemoLine("DL30",     2, "Barril", "AC04A1", 4.0, "DAMM LEMON BARRIL 30"),
-    # Smaller barrels (2.5 CE)
+    # Smaller barrels (2.5 CE each)
     _DemoLine("ID20",     2, "Barril", "AC01A1", 2.5, "INEDIT DAMM BARRIL 20L"),
     _DemoLine("DL20",     1, "Barril", "AC03A3", 2.5, "DAMM LEMON BARRIL 20L"),
     _DemoLine("TU20",     2, "Barril", "AC03A2", 2.5, "TURIA BARRIL 20L"),
-    # Tubo (CO2 cylinder)
+    # Tubo CO2 (4 CE each)
     _DemoLine("TB8",      2, "Tubo",   "AC01A1", 4.0, "BOTELLAS CARBONICO 8 KILOS"),
 )
+# Totals (CE):
+#   Cases     = 261 → 1 staple (P1=35) + 4 case pallets (~226 CE)
+#   Barrels   =  45 → 1 barrel pallet (P6)
+#   Total used = 6 / 6 slots of truck_6p_sidecurtain
 
 
 # ---------------------------------------------------------------------------
