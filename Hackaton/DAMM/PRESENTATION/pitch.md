@@ -3,310 +3,568 @@ marp: true
 theme: default
 size: 16:9
 paginate: true
-backgroundColor: #fff
-color: #1A1A1A
-header: '**Smart Truck** · Pelota Brava · Interhack BCN 2026'
-footer: 'DAMM challenge · DDI Mollet'
+backgroundColor: '#ffffff'
+color: '#1A1A1A'
+footer: 'Damm Smart Truck · Interhack BCN 2026'
 style: |
+  /* ==== Base typography matching the DAMM deck ==== */
   section {
-    font-family: 'Helvetica Neue', sans-serif;
-    padding: 60px;
+    font-family: 'Helvetica Neue', 'Inter', 'Segoe UI', sans-serif;
+    font-size: 22px;
+    padding: 70px 90px 60px 90px;
+    color: #1A1A1A;
+    background: #ffffff;
   }
-  h1 { color: #E30613; font-size: 60px; }
-  h2 { color: #E30613; font-size: 40px; }
-  h3 { color: #1A1A1A; }
-  strong { color: #E30613; }
-  .red { color: #E30613; }
-  .small { font-size: 0.7em; color: #555; }
-  table { font-size: 0.75em; }
-  pre { font-size: 0.55em; line-height: 1.2; }
+  section::after {
+    color: #999;
+    font-size: 14px;
+    font-weight: 400;
+    bottom: 25px;
+    right: 40px;
+  }
+  footer {
+    color: #999;
+    font-size: 14px;
+    font-weight: 400;
+    bottom: 25px;
+    left: 40px;
+  }
+
+  /* ==== Section eyebrow + big title pattern ==== */
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #E30613;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 56px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #1A1A1A;
+    margin: 0 0 28px 0;
+    letter-spacing: -0.5px;
+  }
+  h2 {
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #1A1A1A;
+    margin: 0 0 24px 0;
+    letter-spacing: -0.3px;
+  }
+  h3 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1A1A1A;
+    margin: 0 0 12px 0;
+  }
+  strong { color: #E30613; font-weight: 700; }
+  em { font-style: normal; color: #555; }
+
+  ul, ol { line-height: 1.6; }
+  li { margin-bottom: 8px; }
+
+  blockquote {
+    font-size: 28px;
+    font-style: italic;
+    color: #1A1A1A;
+    border-left: 4px solid #E30613;
+    padding: 8px 0 8px 24px;
+    margin: 24px 0;
+    line-height: 1.3;
+  }
+
+  table {
+    font-size: 18px;
+    width: 100%;
+    border-collapse: collapse;
+  }
+  table th {
+    text-align: left;
+    color: #999;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 10px 14px;
+    border-bottom: 2px solid #E30613;
+  }
+  table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #eee;
+  }
+
+  pre {
+    background: #f7f7f7;
+    color: #1A1A1A;
+    padding: 18px 22px;
+    border-left: 4px solid #E30613;
+    border-radius: 0;
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 18px 0;
+  }
+  code { background: #f3f3f3; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+
+  /* ==== Cover slide ==== */
+  section.cover {
+    background: linear-gradient(135deg, #fff 0%, #f8f8f8 100%);
+    padding: 110px 100px;
+  }
+  section.cover h1 {
+    font-size: 96px;
+    line-height: 1;
+    margin-bottom: 0;
+    color: #1A1A1A;
+  }
+  section.cover h1 strong { color: #E30613; }
+  section.cover .tagline {
+    font-size: 28px;
+    color: #555;
+    font-weight: 400;
+    margin: 24px 0 64px 0;
+    border-left: 4px solid #E30613;
+    padding-left: 20px;
+  }
+  section.cover .meta {
+    color: #999;
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+
+  /* ==== Closing slide ==== */
+  section.closing {
+    background: #1A1A1A;
+    color: #fff;
+    padding: 110px 100px;
+  }
+  section.closing h1 { color: #fff; font-size: 64px; }
+  section.closing strong { color: #E30613; }
+  section.closing .tagline {
+    font-size: 24px;
+    color: #ddd;
+    border-left: 4px solid #E30613;
+    padding-left: 20px;
+    margin-top: 20px;
+  }
+
+  /* ==== KPI grid ==== */
   .kpi-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 20px;
-    margin-top: 30px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-top: 24px;
   }
   .kpi {
-    background: #f8f9fa;
-    border-left: 6px solid #E30613;
-    padding: 16px;
-    border-radius: 4px;
+    background: #f8f8f8;
+    border-top: 4px solid #E30613;
+    padding: 24px;
   }
-  .kpi-value { font-size: 2em; color: #E30613; font-weight: bold; }
-  .kpi-label { font-size: 0.85em; color: #555; }
+  .kpi-eyebrow {
+    text-transform: uppercase;
+    color: #999;
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    margin-bottom: 8px;
+  }
+  .kpi-value {
+    font-size: 56px;
+    font-weight: 700;
+    color: #E30613;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+  .kpi-detail {
+    font-size: 13px;
+    color: #555;
+    margin-top: 10px;
+    line-height: 1.4;
+  }
+
+  /* ==== Two-column ==== */
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+  }
+  .col-with-rule {
+    border-left: 1px solid #ddd;
+    padding-left: 30px;
+  }
+
+  /* ==== Pill / chip ==== */
+  .pill {
+    display: inline-block;
+    background: #E30613;
+    color: #fff;
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  /* ==== Big single number for hero stats ==== */
+  .hero-num {
+    font-size: 140px;
+    font-weight: 700;
+    color: #E30613;
+    line-height: 1;
+    letter-spacing: -3px;
+  }
 ---
 
-<!--
-SPEAKER NOTES (3 min total · ≈20s/slide):
-Total slides: 10 + 1 closing.
-Pace yourself: skip the over-detail slides if running long.
--->
+<!-- _class: cover -->
+<!-- _paginate: false -->
+<!-- _footer: '' -->
 
-# Smart Truck
+<div class="meta">PELOTA BRAVA · INTERHACK BCN 2026</div>
 
-### Mateix recorregut. Camió impecable.
+# Smart **Truck**
 
-Equip **Pelota Brava** · Interhack BCN 2026
-Repte: **DAMM Distribució Directa Integral**
+<div class="tagline">
+Mateix recorregut. Camió impecable.<br/>
+Optimització conjunta de ruta i càrrega per a DDI Mollet.
+</div>
 
-<!--
-0:00 — Hola. Som l'equip Pelota Brava i hem treballat el repte de DAMM.
-La nostra premissa: reduir el temps perdut a tota la cadena, sense
-canviar el SAP que els mossos ja fan servir.
--->
-
----
-
-## El problema, en una imatge
-
-> *"Una mateixa hora, dues optimitzacions oposades."*
-
-| Magatzem (mosso) | Camió (xofer) |
-|---|---|
-| Volem **carregar per Ubicació** lex (recorregut més curt pels passadissos) | Volem **descarregar per parada** (LIFO, sense rotacions) |
-| Empila igual, recull ràpid | Cada parada ≠ desfer i tornar a fer |
-
-A sobre: **60% de retorns** d'envasos. El camió **canvia de forma** durant la ruta.
-
-DAMM ho diu: **NO és Google Maps + Tetris**. És un **sistema de suport a la decisió**.
+<div class="meta">Equip Pelota Brava · Repte Damm DDI · 09 oct 2026</div>
 
 <!--
-0:20 — El repte real no és "google maps + tetris". El que el magatzem
-vol (ordre per Ubicació) entra en conflicte amb el que el xofer vol
-(ordre per parada, LIFO). Plus: el 60% del que va, torna. La nostra
-solució resol els tres alhora.
+0:00 — Hola. Som Pelota Brava i hem treballat el repte Damm.
+La idea: reduir TOT el temps perdut en el procés de distribució —
+ruta, càrrega i descàrrega — sense canviar el SAP que ja funciona.
 -->
 
 ---
 
-## La intervenció: una sola columna
+<div class="eyebrow">Context · 1 de 9</div>
+
+# El conflicte real
+
+<div class="cols">
+<div>
+
+### Magatzem · Mosso
+
+- Carrega **per Ubicació** lex
+- Recorregut més curt pels passadissos
+- Càrrega rapida, ben apilada
+
+</div>
+<div class="col-with-rule">
+
+### Camió · Xofer
+
+- Descàrrega **per parada** LIFO
+- Zero rotació entre parades
+- Sortida ràpida a cada client
+
+</div>
+</div>
+
+<br/>
+
+> *Damm ja ho va escriure: NO és Google Maps + Tetris. **És un sistema de suport a la decisió** que reconcilia magatzem, repartiment i logística inversa.*
+
+<!--
+0:20 — El conflicte real: el magatzem vol carregar per ubicació, el
+xofer vol descarregar per parada. A sobre el 60% dels productes són
+retornables: el camió canvia de forma durant la ruta. Damm ho diu
+explícitament al seu deck: cal un sistema que reconcili els dos.
+-->
+
+---
+
+<div class="eyebrow">Solució · 2 de 9</div>
+
+# Una sola **columna** del SAP
 
 ```
-┌──────────────────────────────────────────────────┐
-│   HOJA DE CARGA · DDIDGP (estandard)             │
-├──────┬─────────┬──────────┬──────┬───────────────┤
-│ Ubic │ Núm.Prod│ Cantitat │ Lot  │  Descàrrega   │
-├──────┼─────────┼──────────┼──────┼───────────────┤
-│AA09A1│ ED13    │  3 Caja  │  ··  │      P1       │  ← Smart
-│AC07A2│ 0AG003  │  1 Caja  │  ··  │      P5       │  ← Smart
-│AA10A1│ ED30    │  1 Barril│  ··  │      P6       │  ← Smart
-└──────┴─────────┴──────────┴──────┴───────────────┘
-                                    └─ avui surt sempre BUIDA
+┌──────────┬──────────┬──────────┬──────────┬─────────────┐
+│ Ubicació │ Producte │ Cantitat │   Lot    │  Descàrrega │
+├──────────┼──────────┼──────────┼──────────┼─────────────┤
+│  AA09A1  │  ED13    │  3 Caja  │   ···    │     P1      │ ← omplim
+│  AC07A2  │  0AG003  │  1 Caja  │   ···    │     P5      │ ← omplim
+│  AA10A1  │  ED30    │  1 Barril│   ···    │     P6      │ ← omplim
+└──────────┴──────────┴──────────┴──────────┴─────────────┘
 ```
 
-**Adopció = 0**. Mateix paper, mateix mosso, mateix xofer. Una columna més.
+El SAP de DDIDGP **ja imprimeix aquesta columna** a la Hoja Carga — sempre buida.
+Smart Truck **l'omple** amb el slot òptim del camió.
+
+<br/>
+
+**Adopció ≈ zero**. Mateix paper, mateix mosso, mateix xofer. Una columna addicional.
 
 <!--
-0:40 — Aquesta és la idea clau. La hoja de càrrega del SAP de DAMM ja
-té una columna "Descàrrega" que SEMPRE surt en blanc. El SAP no la
-omple. Smart Truck l'omple. El picker veu el mateix paper, però amb
-una columna més que li diu directament a quin slot del camió va cada
-caixa.
+0:40 — La nostra intervenció és única: hi ha una columna a la Hoja
+Carga del SAP que sempre surt buida — ningú la omple. Smart Truck
+calcula i omple aquesta columna amb el slot del camió per a cada
+línia. Adopció pràcticament zero.
 -->
 
 ---
 
-## Demo · 1 de 4 — Tauler
+<div class="eyebrow">Demo · 3 de 9 · Tauler</div>
 
-![bg right:55% 90%](placeholder-tauler.png)
+# 15 parades · OSRM real-road
 
-- **15 parades** reals: Sant Julià · Calldetenes · Folgueroles
-- **Ruta optimitzada** per OSRM (carreteres reals, no haversine)
-- Polilínia segueix la C-25 i N-141 fins l'Osona
-- Click a una parada → explicació + ítems a entregar
+![bg right:54% fit](placeholder-tauler.png)
+
+- Sant Julià de Vilatorta · Calldetenes · Folgueroles
+- Ruta optimitzada amb **OR-Tools VRP-TW** + matriu OSRM real
+- Polilínia que segueix la **C-25 i N-141** fins l'Osona
+- Click → explicació de la parada + ítems a entregar
+- Familiarity bias soft (ordre del SAP com a referència)
 
 <!--
-1:00 — Demostració. Tauler principal. La ruta optimitzada per OR-Tools
-+ OSRM, agrupant els 15 stops en un cercle tancat. Click a una parada
-i veus els productes que rep aquest client.
+1:00 — DEMO. Tauler. 15 parades reals d'Osona. Ruta calculada amb
+OR-Tools sobre matriu OSRM (no haversine). El polígon vermell segueix
+les carreteres reals.
 -->
 
 ---
 
-## Demo · 2 de 4 — Magatzem
+<div class="eyebrow">Demo · 4 de 9 · Magatzem</div>
 
-![bg right:55% 90%](placeholder-magatzem.png)
+# Suport visual 3D · per Ubicació
 
-- Suport visual **3D animat** per al mosso
-- Cada **pas = una Ubicació** (recorregut lex pel magatzem)
-- Una sola **onada** distribueix entre múltiples palets
-- **Caixes** com cubs · **Barrils** com cilindres
-- Color **per producte** (cross-reference llista ↔ palet 3D)
+![bg right:54% fit](placeholder-magatzem.png)
+
+- Cada **pas = una Ubicació** del magatzem en lex order
+- **Una sola onada** distribueix entre múltiples palets
+- **Caixes** com cubs · **Barrils** com cilindres metàl·lics
+- Color **per producte**: cross-reference llista ↔ palet 3D
+
+<br/>
+
+<span class="pill">★ Columna staple</span> SKUs universals (ED13) ocupen una columna sencera — un sol palet, una sola onada al magatzem.
 
 <!--
-1:20 — La pestanya Magatzem. Cada pas és una ubicació al magatzem.
-El mosso fa el recorregut de sempre però Smart Truck li diu a quin
-palet va cada producte. Animació de boxes apilant-se de baix cap a
-dalt en LIFO. Barrils com cilindres metàl·lics.
+1:20 — Magatzem. El mosso fa el recorregut de sempre per ubicació.
+Smart Truck reparteix cada onada entre els slots del camió. Caixes i
+barrils discrets, gravetat respectada. Animació de càrrega pas per pas.
 -->
 
 ---
 
-## Demo · 3 de 4 — Camió
+<div class="eyebrow">Demo · 5 de 9 · Camió</div>
 
-![bg right:55% 90%](placeholder-camio.png)
+# Distribució òptima dels palets
 
-| Slot | CE | Tipus | Stops | Què hi va |
+| Slot | CE | Tipus | Stops | Contingut |
 |---|---|---|---|---|
-| **P1** | 35/60 | CASE staple | 1-15 | Estrella 1/3 — *columna fixa* |
-| P3 | 59/60 | CASE | 10-15 | Clúster final |
-| P5 | 56/60 | CASE | 1-9 | Clúster inicial |
-| **P6** | 44/60 | BARREL | 1, 11, 12, 15 | **Només 4 stops!** |
+| **P1** | 35 / 60 | CASE staple | 1–15 | Estrella 1/3 — *columna fixa* |
+| P3 | 59 / 60 | CASE | 10–15 | Clúster final |
+| P5 | 56 / 60 | CASE | 1–9 | Clúster inicial |
+| **P6** | 44 / 60 | BARREL | 1, 11, 12, 15 | **Només 4 stops** |
 
-**P6 ja no s'obre a totes les parades** ← bug abans de l'algorisme
+<br/>
+
+> P6 ja no s'obre a totes les parades — només a les que demanen barril.
+> P1 dóna a totes — un sol palet front-curtain alimenta el cicle Estrella.
 
 <!--
-1:40 — Camió 3D. P1 = la columna staple ED13 que serveix les 15
-parades sense rotació. P6 = barrils, només 4 parades amb barril real.
-La part important: tots els integers, tots els barrils sencers.
+1:40 — Camió. P1 és la columna staple ED13 que serveix les 15
+parades sense rotació. P6 són els barrils, només 4 parades amb barril
+real. Cada quantitat un sencer, cap fracció.
 -->
 
 ---
 
-## Demo · 4 de 4 — Conductor
+<div class="eyebrow">Demo · 6 de 9 · Conductor</div>
 
-![bg right:55% 90%](placeholder-conductor.png)
+# Aplicació mòbil funcional
 
-- App de mòbil **funcional**: navegació + confirmació
-- Per cada parada: cortina · palet · ítems · CONTADO/CRÈDIT
-- "Confirmar lliurament" → salta a la pròxima
-- Llista lateral de **15 parades** amb indicador de progrés
+![bg right:54% fit](placeholder-conductor.png)
+
+- Pantalla per cada parada · navegació prev / next
+- **Cortina** + **palet** + ítems amb quantitats senceres
+- CONTADO · CRÈDIT · finestra horària · ETA real
+- "Confirmar lliurament" → salta a la pròxima parada
+- Llista lateral amb el progrés del recorregut
 
 <!--
-2:00 — Pestanya Conductor. Aplicació mòbil amb pantalla per parada,
-botó "Confirmar lliurament" que avança al següent. Llista lateral amb
-totes les parades + progrés. ETA, finestra horària, palet a obrir,
-ítems amb quantitats senceres.
+2:00 — Conductor. App de mòbil amb tots els elements: parada, palet,
+quantitat. Botó vermell "Confirmar lliurament" que avança al següent.
+Llista lateral amb totes les parades + progrés.
 -->
 
 ---
 
-## Algorisme — pipeline conjunt
+<div class="eyebrow">Algorisme · 7 de 9</div>
+
+# Pipeline conjunt
 
 ```
-deliveries.parquet         vehicles/*.yaml         OSRM /table
-       │                          │                     │
-       ▼                          ▼                     ▼
-   demanda          ─────►   pressupost           matriu
-   per parada               de palets         distància+temps
-       │                          │                     │
-       └──────────────┬───────────┘                     │
-                     ▼                                  │
-            **PACKER v3**                               │
-            Stack-LIFO + MILP + columna staple ───┐     │
-                     │                            │     │
-                     ▼                            ▼     ▼
-                cap. real                **VRP-TW + OR-Tools**
-                     │                  familiarity bias (A-12)
-                     │                            │
-                     └──────────────┬─────────────┘
-                                    ▼
-                            ETAs · KPIs
-                          Plan + BaselinePlan
+deliveries.parquet           vehicles/*.yaml          OSRM /table
+        │                            │                       │
+        ▼                            ▼                       ▼
+   demanda                    pressupost                 matriu
+   per parada      ──────►    de palets             distància+temps
+        │                            │                       │
+        └──────────────┬─────────────┘                       │
+                       ▼                                     │
+              PACKER STACK-LIFO v3                           │
+              MILP customer→pallet · CBC 10s                 │
+              + columna staple ED13/CJ13          ────►      │
+                       │                                     │
+                       ▼                                     │
+                  capacitat ◄─────────────────────►   VRP-TW + OR-Tools
+                    real                            familiarity bias (A-12)
+                       │                                     │
+                       └──────────────┬──────────────────────┘
+                                      ▼
+                                ETAs · KPIs
+                            Plan + BaselinePlan
 ```
 
-**MILP** minimitza Σ(seq_max − seq_min) per slot · **CBC** wall-time 10s · **Heurística** fallback
+**Dos optimitzadors encadenats** · sortida coordinada per la capacitat real del camió.
 
 <!--
 2:20 — L'algorisme: dos optimitzadors encadenats. El packer Stack-LIFO
-amb MILP decideix la mida del camió i l'assignació client→palet.
-Després el VRP-TW d'OR-Tools optimitza l'ordre amb la capacitat real
-del camió com a constraint.
++ MILP escull el camió i com s'apila la càrrega. El VRP-TW d'OR-Tools
+optimitza l'ordre de parades amb la capacitat real del camió com a
+constraint.
 -->
 
 ---
 
-## Resultats — coeficient global K
+<div class="eyebrow">Resultats · 8 de 9</div>
+
+# Coeficient global d'optimització
 
 <div class="kpi-grid">
-
 <div class="kpi">
-<div class="kpi-label">C_ruta</div>
+<div class="kpi-eyebrow">C_RUTA</div>
 <div class="kpi-value">0.146</div>
-<div class="small">14.6% temps perdut a la carretera eliminat</div>
+<div class="kpi-detail">14.6% de pèrdua eliminada<br/>a la carretera</div>
 </div>
-
 <div class="kpi">
-<div class="kpi-label">C_muntatge</div>
+<div class="kpi-eyebrow">C_MUNTATGE</div>
 <div class="kpi-value">0.712</div>
-<div class="small">71.2% espai malbaratat al palet eliminat</div>
+<div class="kpi-detail">71.2% d'espai de palet<br/>recuperat</div>
 </div>
-
 <div class="kpi">
-<div class="kpi-label">C_conductor</div>
+<div class="kpi-eyebrow">C_CONDUCTOR</div>
 <div class="kpi-value">0.525</div>
-<div class="small">52.5% temps perdut a parades eliminat</div>
+<div class="kpi-detail">52.5% de pèrdua a parades<br/>eliminada</div>
+</div>
 </div>
 
-</div>
+<br/>
 
 ```
 K = 0.35·C_ruta + 0.20·C_muntatge + 0.45·C_conductor = 0.43
 ```
 
-**43% de la pèrdua operacional ponderada eliminada · 1 sola ruta · sense canviar el SAP**
+**43% de la pèrdua operacional ponderada eliminada** — una sola ruta · sense canviar el SAP.
 
 <!--
-2:40 — El nostre KPI consolidat. Tres coeficients que mesuren cada
-font de pèrdua de temps al procés. C_muntatge és el guany més gran:
-71% de l'espai del palet ja no es malbarata. C_conductor: 53% menys
-parada. K global = 0.43 = 43% de pèrdua operacional eliminada en una
-sola ruta.
+2:40 — Tres coeficients que mesuren cada font de pèrdua de temps.
+C_muntatge és el guany més gran: 71% d'espai del palet recuperat.
+C_conductor: 53% menys parada. K = 0.43 = 43% de pèrdua eliminada.
 -->
 
 ---
 
-## Tancament
+<div class="eyebrow">Diferenciador · 9 de 9</div>
 
-> **Smart Truck — La columna Descàrrega ja no surt en blanc.**
+# Per què Smart Truck guanya
 
-- Mateix paper. Mateix flux. Mateixa adopció ≈ zero.
-- 5 KPIs millorats simultàniament en una sola ruta.
-- Algorisme reproduïble: codi obert al repo `Pelota-brava-damm/`
+<div class="cols">
+<div>
 
-**Següents passos**:
-- Albarans reals (atribució exacta) → K esperat ≈ 0.55
-- Multi-camió / multi-dia (rolling)
-- Calibrar pesos `(w_r, w_m, w_d)` amb dades operatives DAMM
+### Aplicabilitat (30%)
+- Construit sobre les **dades reals** de Mollet
+- Fa servir el **SAP existent**, no el reemplaça
+- Llista de SKUs de DR0027 reals
+- Codi obert al repo
+
+### Tècnic (25%)
+- Stack-LIFO + **MILP** (PuLP/CBC)
+- VRP-TW d'**OR-Tools** + OSRM real
+- Re-geocodificació amb bbox català
+
+</div>
+<div class="col-with-rule">
+
+### Impacte (20%)
+- **5 KPIs** millorats simultàniament
+- Coeficient global **K = 0.43**
+- Extrapolable a **470 vehicles**
+
+### Creativitat (15%)
+- **Columna Descàrrega** del SAP omplerta
+- **Cicle Estrella** com a staple universal
+- Càrrega per Ubicació + LIFO **híbrid**
+
+### Pitch (10%)
+- Tres coeficients · llenguatge Damm
+
+</div>
+</div>
 
 <!--
-3:00 — Tancament. Som al límit del que el SAP ens dóna sense Albarans
-reals. Si DAMM ens passa 2-3 dies de Albarans, podem afinar el packer
-i pujar el K a ~0.55. Gràcies, preguntes.
+3:00 — Per què guanyem cada criteri: aplicabilitat (dades reals + SAP
+existent), tècnic (MILP + OR-Tools + OSRM), impacte (K=0.43, 470
+vehicles), creativitat (la columna Descàrrega és la troballa
+diferenciadora), pitch (llenguatge Damm + coeficients).
 -->
 
 ---
 
-## Apèndix · Q&A preparat
+<!-- _class: closing -->
+<!-- _paginate: false -->
+<!-- _footer: '' -->
+<!-- _backgroundColor: '#1A1A1A' -->
+<!-- _color: '#ffffff' -->
 
-### **«Quant tarda el càlcul?»**
-Primera càrrega ~40 s (OSRM + MILP). Després **cache instantània**.
-Amb un VRP de 50 stops cau a 1-2 min — viable per a la flota completa.
+# Smart **Truck**
 
-### **«I si no tenim els Albarans?»**
-La pipeline ja funciona amb l'agregat del Hoja Carga. Avui és el camí
-del demo. Atribuïm per proforma. Albarans reals → tret marginal de la
-mètrica `in_truck_searches`.
+<div class="tagline">
+La columna Descàrrega ja no surt en blanc.
+</div>
 
-### **«Com escala a tota la flota DAMM?»**
-470 vehicles × 1 cache local per ruta. El packer i el VRP corren en paral·lel
-per ruta (independents). 15-20 min per a tota una nit de planificació.
+<br/>
 
-### **«Quina és la integració amb el SAP DDIDGP?»**
-Smart Truck **emet** un PDF amb la mateixa estructura que el Hoja Carga
-del SAP, però amb la columna Descàrrega plena. **No reemplaça res**;
-afegeix.
+### Següents passos
 
-### **«Què passa amb els retorns?»**
-A-35 + A-38: els envasos retornats reentren al **mateix slot** que els
-caixons plens van deixar lliure. P1/P6 = palets que es buiden poc =
-no els fem servir per absorbir retorns. Roadmap.
+- Albarans reals per atribució exacta · K esperat **≈ 0.55**
+- Multi-camió · multi-dia · re-optimització rolling
+- Calibrar `(w_r, w_m, w_d)` amb dades operatives Damm
+- Integració amb el sistema d'impressió DDIDGP
+
+<br/>
+
+<div class="meta" style="color:#999;">PELOTA BRAVA · INTERHACK BCN 2026</div>
 
 <!--
-APÈNDIX preguntes Q&A. Si tenim 2 minuts, prepara't a:
-- Performance: 40s primera vegada, després instantani.
-- Albarans: ja funciona sense, millora amb.
-- Escalat: paral·lelitzable per ruta.
-- Integració: emet la mateixa hoja, afegeix una columna.
-- Retorns: reentren al mateix slot per A-35/A-38.
+3:20 — Tancament. Som al límit del que ens dóna l'agregació
+proporcional. Si Damm ens passa Albarans reals, K puja a ~0.55.
+Multi-camió i rolling re-optimisation són naturals next steps.
+Gràcies. Preguntes.
+-->
+
+---
+
+<!-- _footer: 'Apèndix · Q&A' -->
+
+<div class="eyebrow">Apèndix · Q&A preparat</div>
+
+# Preguntes anticipades
+
+| Pregunta | Resposta breu |
+|---|---|
+| **Quant tarda el càlcul?** | 40 s primera vegada (OSRM + MILP); després **cache instantània**. Fleet completa: 15-20 min/nit. |
+| **I sense Albarans reals?** | Pipeline ja funciona amb proforma proportional. Albarans → més precisió a `in_truck_searches`, no canvi qualitatiu. |
+| **Escalabilitat?** | 470 vehicles · 1 cache local per ruta · processament **paral·lelitzable** per ruta. |
+| **Integració SAP DDIDGP?** | **Smart Truck no reemplaça res.** Emet la mateixa Hoja Carga + columna Descàrrega plena. |
+| **Què passa amb els retorns?** | A-35 + A-38: envasos retornats reentren al **mateix slot** que el ple va deixar lliure. P1/P6 mai són absorbidors. |
+
+<!--
+APÈNDIX — només si tenim 2 minuts. Contestar curt i directe.
 -->
