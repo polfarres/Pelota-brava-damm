@@ -45,13 +45,7 @@ from .models import (
     StopPlan,
     VehicleProfileName,
 )
-from .paperwork.parser import (
-    HojaCarga,
-    HojaCargaLine,
-    HojaRuta,
-    parse_hoja_carga,
-    parse_hoja_ruta,
-)
+from .paperwork.parser import HojaCarga, HojaCargaLine, HojaRuta, parse_hoja_carga, parse_hoja_ruta
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "backend" / "data" / "processed"
@@ -96,31 +90,6 @@ def reconstruct_baseline(
         raise ValueError(
             f"Hoja Carga / Hoja Ruta carga IDs disagree: {hc.nº_carga} vs {hr.nº_carga}"
         )
-
-    stops = _build_stops(hr, hc, inputs)
-    slots = _build_baseline_slots(hc, inputs)
-
-    return BaselinePlan(
-        ruta=hc.ruta,
-        fecha=hc.fecha,
-        vehicle_profile=vehicle_profile,
-        stops=stops,
-        slot_assignments=slots,
-    )
-
-
-def reconstruct_baseline_from_synth(
-    hc: HojaCarga,
-    hr: HojaRuta,
-    inputs: BaselineInputs | None = None,
-    vehicle_profile: VehicleProfileName = DEFAULT_VEHICLE_PROFILE,
-) -> BaselinePlan:
-    """Same as :func:`reconstruct_baseline` but takes already-built
-    :class:`HojaCarga` / :class:`HojaRuta` objects (synthesised from
-    deliveries.parquet for routes that don't have source PDFs).
-    """
-    if inputs is None:
-        inputs = BaselineInputs.load()
 
     stops = _build_stops(hr, hc, inputs)
     slots = _build_baseline_slots(hc, inputs)
