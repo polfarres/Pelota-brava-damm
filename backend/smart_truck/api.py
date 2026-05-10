@@ -31,11 +31,17 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .baseline import RECURSOS_DIR, BaselineInputs, reconstruct_baseline
+from .baseline import (
+    BaselineInputs,
+    RECURSOS_DIR,
+    reconstruct_baseline,
+    reconstruct_baseline_from_synth,
+)
 from .kpi import compute_kpis
 from .optimize import pipeline
 from .paperwork.emitter import emit_smart_hoja_carga, emit_smart_hoja_ruta
 from .paperwork.parser import parse_hoja_carga, parse_hoja_ruta
+from .paperwork.synth import synthesise_hoja_carga, synthesise_hoja_ruta
 
 # Map a run_id to the source PDFs we'll emit a Smart variant of.
 # Today: only one demo carga is wired. Future: the Plan store yields
@@ -70,22 +76,31 @@ def _parse_run_id(run_id: str) -> tuple[str, str]:
 
 
 def _get_or_compute_plan(ruta: str, fecha_iso: str, *, force: bool = False):
-    """Return the cached Plan + KpiSummary, computing on first miss."""
+    """Return the cached Plan + KpiSummary, computing on first miss.
+
+    For routes with source PDFs (DR0027 / 2026-05-08 demo) the baseline
+    is the parsed paperwork. For any other (ruta, fecha) present in
+    deliveries.parquet, the baseline is synthesised from that data.
+    """
     key = f"{ruta}-{fecha_iso}"
     if force or key not in _PLAN_CACHE:
-        if key not in _KNOWN_CARGAS:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"unknown run_id {key!r}. Today only "
-                    f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
-                ),
+        try:
+            plan_obj = pipeline.plan(
+                ruta, date.fromisoformat(fecha_iso), prefer_osrm=True
             )
-        plan_obj = pipeline.plan(
-            ruta, date.fromisoformat(fecha_iso), prefer_osrm=True
-        )
-        carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
-        baseline = reconstruct_baseline(carga_pdf, ruta_pdf)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+        if key in _KNOWN_CARGAS:
+            carga_pdf, ruta_pdf = _KNOWN_CARGAS[key]
+            baseline = reconstruct_baseline(carga_pdf, ruta_pdf)
+        else:
+            try:
+                hc = synthesise_hoja_carga(ruta, date.fromisoformat(fecha_iso))
+                hr = synthesise_hoja_ruta(ruta, date.fromisoformat(fecha_iso))
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e)) from e
+            baseline = reconstruct_baseline_from_synth(hc, hr)
         kpis = compute_kpis(baseline, plan_obj, prefer_osrm=True)
         _PLAN_CACHE[key] = (plan_obj, kpis)
     return _PLAN_CACHE[key]
@@ -141,23 +156,25 @@ def health() -> dict[str, str]:
 def get_baseline(ruta: str, fecha: str) -> dict[str, Any]:
     """As-is reconstruction (FR-004) for a given ``(ruta, fecha)``.
 
-    Today only ``DR0027 / 2026-05-08`` is wired — that's the only carga
-    we have source PDFs for. Future versions will discover PDFs by ruta
-    and fecha automatically.
+    For ``DR0027 / 2026-05-08`` we have source PDFs and parse them
+    directly. For any other (ruta, fecha) present in
+    deliveries.parquet, the BaselinePlan is built from a synthetic
+    Hoja Carga / Hoja Ruta — same shape, real per-customer line data.
     """
-    if (ruta, fecha) != ("DR0027", "2026-05-08"):
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Only DR0027 / 2026-05-08 has source PDFs for now. "
-                "Add a Hoja Carga + Hoja Ruta PDF pair under "
-                "Hackaton/DAMM/RECURSOS/ to extend coverage."
-            ),
+    key = f"{ruta}-{fecha}"
+    if key in _KNOWN_CARGAS:
+        bp = reconstruct_baseline(
+            RECURSOS_DIR / "Hoja Carga.pdf",
+            RECURSOS_DIR / "Hoja Ruta.pdf",
         )
-    bp = reconstruct_baseline(
-        RECURSOS_DIR / "Hoja Carga.pdf",
-        RECURSOS_DIR / "Hoja Ruta.pdf",
-    )
+        return _jsonable(bp)
+
+    try:
+        hc = synthesise_hoja_carga(ruta, date.fromisoformat(fecha))
+        hr = synthesise_hoja_ruta(ruta, date.fromisoformat(fecha))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    bp = reconstruct_baseline_from_synth(hc, hr)
     return _jsonable(bp)
 
 
@@ -297,23 +314,22 @@ def _fetch_osrm_route_geometry(
 def get_smart_hoja_carga(run_id: str) -> Response:
     """Smart Hoja Carga PDF (FR-010).
 
-    Resolves the run_id to its source PDF + cached Plan, then emits a
-    Smart Hoja Carga whose ``Descarga`` column is populated from the
-    optimiser. ``run_id`` format: ``{ruta}-{fecha}``, e.g.
-    ``DR0027-2026-05-08``.
+    Resolves the run_id to its source paperwork (real PDFs for the
+    DR0027/2026-05-08 demo, synthesised from deliveries.parquet
+    otherwise) + cached Plan, then emits a Smart Hoja Carga whose
+    ``Descarga`` column is populated from the optimiser.
+    ``run_id`` format: ``{ruta}-{fecha}``.
     """
-    if run_id not in _KNOWN_CARGAS:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"unknown run_id {run_id!r}. Today only "
-                f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
-            ),
-        )
     ruta, fecha = _parse_run_id(run_id)
     plan_obj, _ = _get_or_compute_plan(ruta, fecha)
-    carga_pdf, _ = _KNOWN_CARGAS[run_id]
-    source = parse_hoja_carga(carga_pdf)
+    if run_id in _KNOWN_CARGAS:
+        carga_pdf, _ = _KNOWN_CARGAS[run_id]
+        source = parse_hoja_carga(carga_pdf)
+    else:
+        try:
+            source = synthesise_hoja_carga(ruta, date.fromisoformat(fecha))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
     pdf = _emit_via_tempfile(emit_smart_hoja_carga, source, plan=plan_obj)
     return Response(content=pdf, media_type="application/pdf")
 
@@ -322,17 +338,15 @@ def get_smart_hoja_carga(run_id: str) -> Response:
 def get_smart_hoja_ruta(run_id: str) -> Response:
     """Smart Hoja Ruta PDF (FR-011). Reorders rows to the optimised
     sequence and annotates ETAs from the cached Plan."""
-    if run_id not in _KNOWN_CARGAS:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"unknown run_id {run_id!r}. Today only "
-                f"{', '.join(sorted(_KNOWN_CARGAS))} is wired."
-            ),
-        )
     ruta, fecha = _parse_run_id(run_id)
     plan_obj, _ = _get_or_compute_plan(ruta, fecha)
-    _, ruta_pdf = _KNOWN_CARGAS[run_id]
-    source = parse_hoja_ruta(ruta_pdf)
+    if run_id in _KNOWN_CARGAS:
+        _, ruta_pdf = _KNOWN_CARGAS[run_id]
+        source = parse_hoja_ruta(ruta_pdf)
+    else:
+        try:
+            source = synthesise_hoja_ruta(ruta, date.fromisoformat(fecha))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
     pdf = _emit_via_tempfile(emit_smart_hoja_ruta, source, plan=plan_obj)
     return Response(content=pdf, media_type="application/pdf")

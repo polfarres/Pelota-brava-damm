@@ -16,7 +16,7 @@ const TruckScene3D = dynamic(() => import('@/components/TruckScene3D'), {
   ),
 });
 
-const RUN_ID = 'DR0027-2026-05-08';
+const RUN_ID = 'DR0027-2026-03-30';
 
 // ---------------------------------------------------------------------------
 // Step builder — by warehouse Ubicació, distributing across pallets.

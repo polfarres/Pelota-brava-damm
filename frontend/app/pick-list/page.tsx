@@ -6,7 +6,7 @@ import { MOCK_BASELINE, MOCK_PLAN } from '@/lib/mocks';
 import { getBaseline, getPlan, hojaCargaPdfUrl } from '@/lib/api';
 import type { BaselinePlan, Plan } from '@/lib/types';
 
-const RUN_ID = 'DR0027-2026-05-08';
+const RUN_ID = 'DR0027-2026-03-30';
 
 export default function PickListPage() {
   const [mode, setMode] = useState<'original' | 'smart'>('smart');
@@ -15,7 +15,7 @@ export default function PickListPage() {
 
   useEffect(() => {
     let cancelled = false;
-    getBaseline('DR0027', '2026-05-08')
+    getBaseline('DR0027', '2026-03-30')
       .then((b) => !cancelled && setBaseline(b))
       .catch(() => {});
     getPlan(RUN_ID)
@@ -33,7 +33,7 @@ export default function PickListPage() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold">Full de Càrrega · DR0027 · 2026-05-08</h1>
+          <h1 className="text-2xl font-bold">Full de Càrrega · DR0027 · 2026-03-30</h1>
           <p className="text-sm text-gray-600 mt-1">
             La columna <code className="bg-gray-200 px-1 rounded">Descàrrega</code> surt en blanc
             del SAP. Smart Truck l&apos;omple amb el slot del camió per línia.

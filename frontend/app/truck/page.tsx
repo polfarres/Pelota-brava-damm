@@ -7,7 +7,7 @@ import { getPlan } from '@/lib/api';
 import { colorForCustomer } from '@/lib/colors';
 import type { Plan } from '@/lib/types';
 
-const RUN_ID = 'DR0027-2026-05-08';
+const RUN_ID = 'DR0027-2026-03-30';
 
 export default function TruckPage() {
   const [plan, setPlan] = useState<Plan>(MOCK_PLAN);
