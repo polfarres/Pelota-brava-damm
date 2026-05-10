@@ -16,19 +16,24 @@ import type { Plan } from '@/lib/types';
 export interface Cell {
   sku: string;
   customer_id: number | null;
+  ubicacion?: string;
+  unit?: string;
 }
 
 interface Props {
   plan: Plan;
-  // Per-slot ordered cell list (built from the rounded step.lines so
-  // each cell == 1 CE of one product, in the picker's load order).
+  // Per-slot ordered cell list (built from the packer output: each cell ==
+  // 1 CE of one product, in load order = bottom-back → top-front).
   cellsBySlot: Map<string, Cell[]>;
-  // Per-slot count of cells already loaded. The first N cells of each
-  // slot's list are rendered. This makes the 3D fill update
-  // incrementally as the picker advances through steps.
-  loadedCellsPerSlot: Map<string, number>;
-  // Slot currently being filled (highlighted).
-  currentSlotId: string | null;
+  // Per-slot subset of cells currently visible. For the Ubicació-driven
+  // walk, this is the cells whose source ubicacion has already been
+  // picked at the current step.
+  visibleCellsPerSlot: Map<string, Cell[]>;
+  // Pallet types per slot (CASE → cubic boxes, BARREL → cylinders).
+  palletTypes: Map<string, 'CASE' | 'BARREL' | null>;
+  // Slots whose contents include a cell from the current Ubicació step
+  // (highlighted with the red ring + active disc label).
+  currentSlotIds: Set<string>;
 }
 
 const STAPLE_SKUS = new Set(['CJ13', 'ED13']);
@@ -43,8 +48,9 @@ function isStapleSlot(pa: { lines: { sku: string }[] } | undefined): boolean {
 export default function TruckScene3D({
   plan,
   cellsBySlot,
-  loadedCellsPerSlot,
-  currentSlotId,
+  visibleCellsPerSlot,
+  palletTypes,
+  currentSlotIds,
 }: Props) {
   const grid = plan.vehicle;
 
@@ -120,9 +126,17 @@ export default function TruckScene3D({
           const x = -cargoLen / 2 + palletDepth / 2 + col * palletDepth;
           const z = -cargoWidth / 2 + palletWidth / 2 + row * palletWidth;
           const pa = plan.pallet_assignments.find((p) => p.slot_id === slotId);
-          const isCurrent = slotId === currentSlotId;
+          const isCurrent = currentSlotIds.has(slotId);
           const staple = isStapleSlot(pa as { lines: { sku: string }[] } | undefined);
           const slotCells = cellsBySlot.get(slotId) ?? [];
+          const visible = visibleCellsPerSlot.get(slotId) ?? [];
+          const palletType = palletTypes.get(slotId) ?? null;
+          // BARREL pallets (or any slot whose visible cells are barrels)
+          // render as cylinders. Per A-37 a slot is either CASE or BARREL,
+          // never mixed.
+          const isBarrelSlot =
+            palletType === 'BARREL' ||
+            (slotCells.length > 0 && slotCells.every((c) => c.unit === 'Barril' || c.unit === 'Tubo'));
 
           return (
             <group key={slotId} position={[x, 0, z]}>
@@ -143,12 +157,13 @@ export default function TruckScene3D({
                 </mesh>
               )}
 
-              {/* Pallet content: render the first N cells based on loaded count */}
+              {/* Pallet content */}
               <PalletStack
                 slotId={slotId}
                 cells={slotCells}
+                visibleCells={visible}
                 isStaple={staple}
-                loadedCells={loadedCellsPerSlot.get(slotId) ?? 0}
+                isBarrelSlot={isBarrelSlot}
                 width={palletWidth - 0.2}
                 depth={palletDepth - 0.2}
                 cargoHeight={cargoHeight - 0.3}
@@ -276,19 +291,55 @@ function cellTransform(
   };
 }
 
+// Barrel-pallet layout: 3 cylinders per level (instead of 10 cube cells).
+// The user's spec says a pallet level holds either 10 boxes or 3 barrels,
+// so 6 levels × 3 barrels = 18 cylinders max. Each barrel takes ~3.33 box
+// equivalents physically and 4 CE in our accounting; the visualisation
+// gives 1 cylinder per CE-bundle of 4 cells (same total CE budget).
+const BARRELS_PER_LEVEL = 3;
+
+function barrelTransform(
+  index: number,
+  depth: number,
+  width: number,
+  cellHeight: number,
+  palletTop: number,
+): { pos: [number, number, number]; radius: number; height: number } {
+  // Each "barrel slot" gets 4 cells worth of CE → group cells into chunks
+  // of 4 per visible cylinder. Index here is the barrel index (not cell).
+  const level = Math.floor(index / BARRELS_PER_LEVEL);
+  const colIdx = index % BARRELS_PER_LEVEL; // 0..2
+
+  const cellDepth = depth / BARRELS_PER_LEVEL;
+  const x = -depth / 2 + (colIdx + 0.5) * cellDepth;
+  const z = 0; // centred on width axis
+  const y = palletTop + (level + 0.5) * cellHeight;
+
+  // Cylinder radius ≈ smaller of (cellDepth/2, width/2) with margin.
+  const radius = Math.min(cellDepth / 2, width / 2) * 0.85;
+
+  return {
+    pos: [x, y, z],
+    radius,
+    height: cellHeight * 0.95,
+  };
+}
+
 function PalletStack({
   slotId,
   cells,
+  visibleCells,
   isStaple,
-  loadedCells,
+  isBarrelSlot,
   width,
   depth,
   cargoHeight,
 }: {
   slotId: string;
   cells: Cell[];
+  visibleCells: Cell[];
   isStaple: boolean;
-  loadedCells: number;
+  isBarrelSlot: boolean;
   width: number;
   depth: number;
   cargoHeight: number;
@@ -296,31 +347,98 @@ function PalletStack({
   const palletTop = 0.16;
   const cellHeight = (cargoHeight - 0.2) / PALLET_LEVELS;
 
-  // Render the first N cells in LIFO load order (bottom-back → top-front).
-  const total = Math.min(cells.length, PALLET_LEVELS * CELLS_PER_LEVEL);
-  const visibleCount = Math.max(0, Math.min(total, loadedCells));
+  const total = cells.length;
+  const visibleCount = Math.min(visibleCells.length, total);
+
+  // Compute "visible-cell-index" for each cell using its position in the
+  // backend's load order (cells array). The visible cells are a subset
+  // (by ubicacion picked), so we need to find their index within `cells`.
+  const visibleIndexSet = useMemo(() => {
+    const set = new Set<number>();
+    if (visibleCells.length === 0) return set;
+    // Track how many of each (sku) have been claimed, since the visible
+    // list is unordered; match each visible cell against the first not-
+    // yet-claimed cell in the canonical list with the same sku.
+    const claimed = new Set<number>();
+    for (const v of visibleCells) {
+      for (let i = 0; i < cells.length; i++) {
+        if (claimed.has(i)) continue;
+        if (cells[i].sku === v.sku) {
+          claimed.add(i);
+          set.add(i);
+          break;
+        }
+      }
+    }
+    return set;
+  }, [cells, visibleCells]);
+
+  const meshes: React.ReactNode[] = [];
+
+  if (isBarrelSlot) {
+    // Render every group of ~4 cells as one cylinder (each CE-bundle of 4).
+    // Use the canonical cells array; show only the first N cylinders that
+    // correspond to visible cells.
+    const totalCylinders = Math.min(
+      Math.ceil(total / 4),
+      PALLET_LEVELS * BARRELS_PER_LEVEL,
+    );
+    const visibleCylinders = Math.min(
+      totalCylinders,
+      Math.ceil(visibleCount / 4),
+    );
+    for (let bi = 0; bi < visibleCylinders; bi++) {
+      // Take the dominant SKU of the cells in this 4-CE bundle.
+      const bundleStart = bi * 4;
+      const bundleCell = cells[bundleStart] ?? cells[0];
+      const { pos, radius, height } = barrelTransform(
+        bi,
+        depth,
+        width,
+        cellHeight,
+        palletTop,
+      );
+      meshes.push(
+        <mesh key={`${slotId}-b${bi}`} castShadow receiveShadow position={pos}>
+          <cylinderGeometry args={[radius, radius, height, 18]} />
+          <meshStandardMaterial color={colorForSku(bundleCell.sku)} />
+        </mesh>,
+      );
+      // Top rim accent (looks like a metal barrel top)
+      meshes.push(
+        <mesh
+          key={`${slotId}-bt${bi}`}
+          position={[pos[0], pos[1] + height / 2 - 0.005, pos[2]]}
+        >
+          <cylinderGeometry args={[radius * 1.01, radius * 1.01, 0.03, 18]} />
+          <meshStandardMaterial color="#525252" metalness={0.6} roughness={0.4} />
+        </mesh>,
+      );
+    }
+  } else {
+    // CASE pallet: cube cells in a 4+4+2 grid, 10 per level × 6 levels.
+    for (let i = 0; i < total; i++) {
+      if (!visibleIndexSet.has(i)) continue;
+      const cell = cells[i];
+      const level = Math.floor(i / CELLS_PER_LEVEL);
+      const cellInLevel = i % CELLS_PER_LEVEL;
+      const { pos, size } = cellTransform(level, cellInLevel, depth, width, cellHeight, palletTop);
+      meshes.push(
+        <mesh
+          key={`${slotId}-${i}`}
+          castShadow
+          receiveShadow
+          position={pos}
+        >
+          <boxGeometry args={size} />
+          <meshStandardMaterial color={colorForSku(cell.sku)} />
+        </mesh>,
+      );
+    }
+  }
 
   // Staple star floats once the column is *fully* loaded.
   const stapleFullyLoaded = isStaple && visibleCount >= total && total > 0;
-
-  const meshes: React.ReactNode[] = [];
-  for (let i = 0; i < visibleCount; i++) {
-    const cell = cells[i];
-    const level = Math.floor(i / CELLS_PER_LEVEL);
-    const cellInLevel = i % CELLS_PER_LEVEL;
-    const { pos, size } = cellTransform(level, cellInLevel, depth, width, cellHeight, palletTop);
-    meshes.push(
-      <mesh
-        key={`${slotId}-${i}`}
-        castShadow
-        receiveShadow
-        position={pos}
-      >
-        <boxGeometry args={size} />
-        <meshStandardMaterial color={colorForSku(cell.sku)} />
-      </mesh>,
-    );
-  }
 
   return (
     <group>

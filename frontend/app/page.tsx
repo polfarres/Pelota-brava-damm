@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import StopList from '@/components/StopList';
-import KpiPanel from '@/components/KpiPanel';
 import ExplanationCard from '@/components/ExplanationCard';
 import { MOCK_PLAN } from '@/lib/mocks';
 import { getPlan } from '@/lib/api';
@@ -79,9 +78,8 @@ export default function Dashboard() {
         />
       </section>
 
-      {/* Right column: KPI + explanation */}
+      {/* Right column: explanation */}
       <aside className="col-span-3 flex flex-col gap-3 overflow-y-auto">
-        <KpiPanel delta={plan.kpi_delta} />
         <ExplanationCard stop={selectedStop} />
       </aside>
     </div>
