@@ -76,9 +76,13 @@ export default function PickListTable({ plan, mode }: Props) {
       });
     });
   } else {
-    // Original: iterate stops, group by Ubicación lex order
-    plan.stops.forEach((s) => {
-      s.delivery_lines.forEach((l) => {
+    // Original (DDIDGP): walk pallet_assignments — the baseline now ships
+    // the full Hoja Carga's lines via slot.contents (one slot per
+    // warehouse Ubicació). Descàrrega stays blank ('(buit)') because the
+    // SAP paperwork doesn't pre-attribute lines to truck pallets — that's
+    // exactly the column the Smart variant adds.
+    plan.pallet_assignments.forEach((pa) => {
+      pa.lines.forEach((l) => {
         const cePerUnit = l.ce ?? 1;
         rawRows.push({
           ubicacion: l.ubicacion || '',
@@ -90,22 +94,7 @@ export default function PickListTable({ plan, mode }: Props) {
           descarga: null, // ★ ALWAYS BLANK in original
           ce: cePerUnit * l.quantity,
           ce_per_unit: cePerUnit,
-          section: 'lleno',
-        });
-      });
-      (s.pickup_envases || []).forEach((l) => {
-        const cePerUnit = l.ce ?? 1;
-        rawRows.push({
-          ubicacion: '',
-          sku: l.sku,
-          description: l.description,
-          quantity: l.quantity,
-          unit: l.unit,
-          lote: l.lote,
-          descarga: null,
-          ce: cePerUnit * l.quantity,
-          ce_per_unit: cePerUnit,
-          section: 'envases',
+          section: pa.is_envase_zone || l.is_envase ? 'envases' : 'lleno',
         });
       });
     });
